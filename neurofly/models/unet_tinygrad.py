@@ -101,21 +101,13 @@ class SegNet():
         self.model = model
         self.bg_thres = bg_thres
     
-    def preprocess(self,img,percentiles=[0.1,1.0]):
+    def preprocess(self,img):
         # input img nparray [0,65535]
         # output img tensor [0,1]
         d,w,h = img.shape
-        img = np.clip(img, a_min=self.bg_thres, a_max=None) - self.bg_thres
-        flattened_arr = np.sort(img.flatten())
-        clip_low = int(percentiles[0] * len(flattened_arr))
-        clip_high = int(percentiles[1] * len(flattened_arr))-1
-        if flattened_arr[clip_high]<self.bg_thres:
-            return None
-        clipped_arr = np.clip(img, flattened_arr[clip_low], flattened_arr[clip_high])
-        min_value = np.min(clipped_arr)
-        max_value = np.max(clipped_arr)
-        filtered = clipped_arr
-        img = (filtered-min_value)/(max_value-min_value)
+        max = img.max()
+        min = img.min()
+        img = (img-min)/(max-min)
         img = img.astype(np.float32)
         img = Tensor(img,requires_grad=False)
         img = img.reshape(1,1,d,w,h)
@@ -131,10 +123,11 @@ class SegNet():
             if thres==None:
                 return prob.numpy()
             else:
+                voxel_mask = img > self.bg_thres
                 prob = prob.numpy()
                 prob[prob>=thres]=1
                 prob[prob<thres]=0
-                return prob
+                return prob*voxel_mask
         else:
             return np.zeros_like(img)
 

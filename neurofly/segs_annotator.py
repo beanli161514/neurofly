@@ -36,6 +36,9 @@ class Annotator(widgets.Container):
         self.ex_edge_layer = self.viewer.add_vectors(None,ndim=3,name='existing edges',vector_style='line',visible=False,edge_width=0.3,opacity=0.15)
         # ------------------------
 
+        # path extension model
+        self.dis_predictor = PosPredictor(default_transformer_weight_path)
+
         # node type notations according to http://www.neuronland.org/NLMorphologyConverter/MorphologyFormats/SWC/Spec.html
         self.node_types = [
             "undefined",         # 0
@@ -77,6 +80,7 @@ class Annotator(widgets.Container):
         self.point_layer.bind_key('f', self.submit_result, overwrite=True)
         self.point_layer.bind_key('w', self.connect_one_nearest, overwrite=True)
         self.point_layer.bind_key('e', self.connect_two_nearest, overwrite=True)
+        self.point_layer.bind_key('d', self.predict_displacement, overwrite=True)
         self.point_layer.bind_key('b', self.last_task, overwrite=True)
         self.point_layer.bind_key('n', self.get_next_task, overwrite=True)
         self.point_layer.bind_key('c', self.purge, overwrite=True)
@@ -397,8 +401,57 @@ class Annotator(widgets.Container):
                                    [selection, int(closest_indices[1])]]
         self.refresh_edge_layer()
         self.refresh(self.viewer)
+    
 
+    def predict_displacement(self,viewer):
+        # predict displacement of current node
+        # first check if current node is the head of a segment longer than 5 points
+        # then crop the image around the node and predict the displacement
+        # add predicted point to the graph and update visual
+        
+        selection = int(self.selected_node.value)
 
+        if self.G.degree(selection) != 1:
+            show_info("current node is not the head of a valid segment")
+            return
+        
+        traj_len = 5
+        img_size = 32
+        current = selection
+        traj = [current]
+        
+        for _ in range(traj_len - 1):
+            neighbors = [n for n in self.G.neighbors(current) if n not in traj]
+            if len(neighbors) != 1:
+                return None  # The path should be exactly one node wide
+            current = neighbors[0]
+            traj.append(current)
+        
+        traj.reverse()
+        traj_coords = [self.G.nodes[n]['coord'] for n in traj]
+        [x,y,z] = traj_coords[-1]
+        img = self.image.from_roi([x-img_size//2,y-img_size//2,z-img_size//2,img_size, img_size, img_size],0,channel=int(self.channel.value))
+
+        displacement = self.dis_predictor.predict_displacement(traj_coords,img)
+
+        new_coord = [int(i+j) for i,j in zip(traj_coords[-1],displacement)]
+
+        new_id = len(self.G)
+        while self.G.has_node(new_id):
+            new_id+=1
+        
+        # add node, add edge, submit result, get next task
+        
+        self.G.add_node(new_id, nid = new_id, coord = new_coord, type = 0, checked = 0, creator = self.user_name.value)
+        self.G.add_edge(new_id, selection, creator = self.user_name.value)
+        self.rtree.insert(new_id, tuple(new_coord + new_coord))
+        self.added['nodes'].append(new_id)
+        self.added['edges'] = [[selection, new_id]]
+
+        self.viewer.layers.selection.active = self.point_layer
+        self.submit_result(self.viewer)
+
+    
     def clip_value(self):
         # image size should be multiples of 64
         self.image_size.value = (self.image_size.value//64)*64
@@ -443,6 +496,9 @@ class Annotator(widgets.Container):
         self.recover(self.viewer)
         if len(self.submit_button.history)>0:
             last_node = self.submit_button.history[-1]
+            if last_node not in self.G.nodes:
+                show_info("No history recorded")
+                return
             self.G.nodes[last_node]['checked'] = -1
             self.selected_node.value = str(last_node)
             self.submit_button.history.remove(last_node)
@@ -1137,5 +1193,4 @@ class Annotator(widgets.Container):
 
             self.refresh(self.viewer)
             self.viewer.layers.selection.active = self.image_layer
-
 

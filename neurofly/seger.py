@@ -469,8 +469,10 @@ class SegerGUI(widgets.Container):
         db_path = str(self.save_dir.value)
         if db_path != '.':
             segs2db(segs, db_path)
-            nodes_invalid, edges_autoConnt = self.seger.connect_segs(db_path)
-            show_info(f"Save {len(segs)} segments to {db_path}.\nRemove {len(nodes_invalid)*2} invalid edges.\nAuto Connect {len(edges_autoConnt)} segments.")
+
+            # TODO: improve this method
+            # nodes_invalid, edges_autoConnt = self.seger.connect_segs(db_path)
+            # show_info(f"Save {len(segs)} segments to {db_path}.\nRemove {len(nodes_invalid)*2} invalid edges.\nAuto Connect {len(edges_autoConnt)} segments.")
 
         seg_points = [seg['sampled_points'] for seg in segs]
         show_segs_as_instances(seg_points, self.viewer)
@@ -569,8 +571,9 @@ def command_line_interface():
 
     if args.db_path is not None:
         segs2db(segs,args.db_path)
-        nodes_invalid, edges_autoConnt = seger.connect_segs(args.db_path)
-        show_info(f"Save {len(segs)} segments to {args.db_path}.\nRemove {len(nodes_invalid)*2} invalid edges.\nAuto Connect {len(edges_autoConnt)} segments.")
+        # TODO: redesign this method
+        # nodes_invalid, edges_autoConnt = seger.connect_segs(args.db_path)
+        # show_info(f"Save {len(segs)} segments to {args.db_path}.\nRemove {len(nodes_invalid)*2} invalid edges.\nAuto Connect {len(edges_autoConnt)} segments.")
 
     if args.vis:
         import napari
