@@ -12,3 +12,4 @@ build
 __pythran__/
 .coverage
 test/
+.vscode
