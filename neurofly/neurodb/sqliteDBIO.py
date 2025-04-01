@@ -5,8 +5,11 @@ from datetime import datetime
 '''
     segs:
         {
+            sid: int, PRIMARY KEY
             points: [head,...,tail],
             sampled_points: points[::interval],
+            version: int,
+            date: str, TIMESTAMP
         }
     nodes:
         {
@@ -62,6 +65,7 @@ class sqliteDBIO:
                 sid INTEGER PRIMARY KEY,
                 points TEXT,
                 sampled_points TEXT,
+                version INTEGER,
                 date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             '''
