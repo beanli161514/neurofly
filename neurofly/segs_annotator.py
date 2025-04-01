@@ -25,7 +25,7 @@ class Annotator(widgets.Container):
         self.viewer.layers.clear()
         self.viewer.window.remove_dock_widget('all')
         # panorama mode
-        self.panorama_image = self.viewer.add_image(np.ones((64, 64, 64), dtype=np.uint16), name='panorama image',visible=False)
+        self.panorama_image = self.viewer.add_image(np.ones((64, 64, 64), dtype=np.uint16), name='panorama image', metadata={'loaded': False},visible=False)
         self.panorama_points = self.viewer.add_points(None,ndim=3,size=None,shading='spherical',border_width=0,properties=None,face_colormap='hsl',name='panorama view',blending='additive',visible=True)
         self.panorama_points.click_get_value = self.panorama_points.get_value
         self.panorama_points.get_value = lambda position, view_direction=None, dims_displayed=None, world=False: None
@@ -195,7 +195,7 @@ class Annotator(widgets.Container):
 
 
     def on_changing_channel(self,viewer):
-        self.panorama_image.scale = [1,1,1]
+        self.panorama_image.metadata['loaded'] = False
         self.refresh_panorama()
 
     def label_undefined(self, viewer):
@@ -434,20 +434,18 @@ class Annotator(widgets.Container):
 
         displacement = self.dis_predictor.predict_displacement(traj_coords,img)
 
-        new_coord = [int(i+j) for i,j in zip(traj_coords[-1],displacement)]
+        new_coord = [i+j for i,j in zip(traj_coords[-1],displacement)]
 
         new_id = len(self.G)
         while self.G.has_node(new_id):
             new_id+=1
         
         # add node, add edge, submit result, get next task
-        
         self.G.add_node(new_id, nid = new_id, coord = new_coord, type = 0, checked = 0, creator = self.user_name.value)
         self.G.add_edge(new_id, selection, creator = self.user_name.value)
         self.rtree.insert(new_id, tuple(new_coord + new_coord))
         self.added['nodes'].append(new_id)
         self.added['edges'] = [[selection, new_id]]
-
         self.viewer.layers.selection.active = self.point_layer
         self.submit_result(self.viewer)
 
@@ -493,12 +491,13 @@ class Annotator(widgets.Container):
 
     def last_task(self,viewer):
         # discard all changes and rollback to last task
-        self.recover(self.viewer)
+        # TODO: solve confilicts
         if len(self.submit_button.history)>0:
             last_node = self.submit_button.history[-1]
             if last_node not in self.G.nodes:
                 show_info("No history recorded")
                 return
+            self.recover(self.viewer)
             self.G.nodes[last_node]['checked'] = -1
             self.selected_node.value = str(last_node)
             self.submit_button.history.remove(last_node)
@@ -526,7 +525,7 @@ class Annotator(widgets.Container):
         dis = []
         for nid in unchecked_nodes:
             dis.append(nx.shortest_path_length(self.G, source=int(self.selected_node.value), target=nid))
-        unchecked_nodes = [x for _,x in sorted(zip(dis,unchecked_nodes))]
+        unchecked_nodes = [x for _ ,x in sorted(zip(dis,unchecked_nodes))]
         
         self.update_meter(len(connected_component),len(unchecked_nodes))
 
@@ -584,6 +583,7 @@ class Annotator(widgets.Container):
                     edges.append([p1,v])
 
         else:
+            # visualize branches of the selected neuron
             branch_points = {node for node in self.G.nodes if self.G.degree[node] > 2}
             distances = {node: float('inf') for node in self.G.nodes}
             distances[selection] = 0
@@ -674,6 +674,7 @@ class Annotator(widgets.Container):
 
     def recover(self, viewer):
         # recover the preserved deleted nodes if exists
+        # TODO: solve confilicts
         for node in self.deleted['nodes']:
             self.G.add_node(node['nid'], nid = node['nid'],coord = node['coord'], type = node['type'], checked = 0, creator = self.user_name.value)
             self.rtree.insert(node['nid'], tuple(node['coord']+node['coord']))
@@ -712,7 +713,7 @@ class Annotator(widgets.Container):
         # update canvas and local graph
         # run refresh to updata canvas
         for edge in self.added['edges']:
-            self.G.add_edge(edge[0],edge[1])
+            self.G.add_edge(edge[0], edge[1], creator = self.user_name.value)
 
         self.G.nodes[int(self.selected_node.value)]['checked']+=1
 
@@ -801,23 +802,14 @@ class Annotator(widgets.Container):
             # read image
             self.image = wrap_image(str(self.image_path.value))
         
-        if ('ims' in str(self.image_path.value) or 'zarr.zip' in str(self.image_path.value)) and (self.panorama_image.scale == np.array([1,1,1])).all() and self.image_switch.value == True:
-            # iterate levels, find one that has proper size
+        if ('ims' in str(self.image_path.value) or 'zarr.zip' in str(self.image_path.value)) and self.panorama_image.metadata['loaded'] == False and self.image_switch.value == True:
+            # iterate levels, find one with proper size
             level = 0
             for i, roi in enumerate(self.image.rois):
                 if (np.array(roi[3:])<np.array([1000,1000,1000])).all():
                     level = i
                     break
-            '''
-            roi = self.image.rois[i]
-            if 'spacing' in self.image.info[i].keys():
-                spacing = self.image.info[i]['spacing']
-            else:
-                roi_level_0 = self.image.rois[0]
-                spacing = [i/j for i,j in zip(roi_level_0[3:],roi[3:])]
-            '''
             # calculate scale
-            # hr_image_size = self.image.info[0]['image_size']
             hr_image_size = self.image.info[int(self.level.value)]['image_size']
             lr_image_size = self.image.info[level]['image_size']
             scale = [i/j for i,j in zip(hr_image_size,lr_image_size)]
@@ -830,6 +822,7 @@ class Annotator(widgets.Container):
             self.panorama_image.translate = origin
             self.panorama_image.visible = True
             self.panorama_image.reset_contrast_limits()
+            self.panorama_image.metadata['loaded'] = True
         
         # load full image if it's tiff format
         if '.tif' in str(self.image_path.value) and self.image_switch.value == True: 
@@ -840,6 +833,7 @@ class Annotator(widgets.Container):
 
 
         # show the number of unlabeled nodes
+        # TODO: This is a costly operation ,consider using a more efficient method
         nodes_left = [
             node for node in self.G.nodes
             if (self.G.nodes[node]['checked'] == -1) or (self.G.degree(node) == 1 and self.G.nodes[node]['checked'] == 0)
@@ -1083,6 +1077,7 @@ class Annotator(widgets.Container):
         elif operation == (2, 'labeling', None): # remove node and its edges
             current_cc = nx.node_connected_component(self.G, c_node)
             if len(current_cc)==1:
+                # for isolated point
                 if node_id in self.added['nodes']:
                     self.added['nodes'].remove(node_id)
                 else:
@@ -1129,6 +1124,7 @@ class Annotator(widgets.Container):
                 if node_id in connected_nbrs:
                     self.added['edges'].remove([c_node, node_id])
 
+                # select neighbor with largest connected component as new center node
                 l_size = 0
                 for nbr in nbrs:
                     length = len(nx.node_connected_component(self.G,nbr))
@@ -1182,10 +1178,9 @@ class Annotator(widgets.Container):
             max_point = [i+int(j) for i,j in zip(max_point,self.image_layer.translate)]
 
             # get new node id
-            # TODO: replace integer node_id with uuid
             new_id = len(self.G)
             while self.G.has_node(new_id):
-                new_id+=1
+                new_id+=10
             
             self.G.add_node(new_id, nid = new_id, coord = max_point, type = 0, checked = 0, creator = self.user_name.value)
             self.rtree.insert(new_id, tuple(max_point+max_point))
