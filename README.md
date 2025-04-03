@@ -4,6 +4,15 @@ This package provides tools for semi-automatic neuron reconstruction. Features b
 
 <img src="https://github.com/beanli161514/neurofly/raw/main/assets/main.png" width="640">
 
+## Update
+
+Our transformer-based autonomous driving model is available now!
+
+
+Press shortcut 'd' to automatically extend segments.
+
+<img src="https://github.com/beanli161514/neurofly/raw/main/assets/autonomous.gif" width="640">
+
 ## Installation
 
 Install the latest version
@@ -14,6 +23,8 @@ or
 ```
 pip install neurofly
 ```
+
+You can also install from [napari hub](https://www.napari-hub.org/plugins/neurofly), using their plugin manager with GUI.
 
 ## Dataset
 
