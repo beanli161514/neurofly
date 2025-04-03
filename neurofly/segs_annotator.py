@@ -102,8 +102,18 @@ class Annotator(widgets.Container):
         self.db_path = widgets.FileEdit(label="database path",filter='*.db')
 
         self.deconv_path = widgets.FileEdit(label="Deconv model weight")
-        self.channel = widgets.LineEdit(label="channel", value=0)
-        self.level = widgets.LineEdit(label="resolution level", value=0)
+        # self.channel = widgets.LineEdit(label="channel", value=0)
+        self.channel = widgets.ComboBox(
+            choices=[], 
+            label='Resolution Level',
+            tooltip='Select resolution level'
+        )
+        # self.level = widgets.LineEdit(label="resolution level", value=0)
+        self.level = widgets.ComboBox(
+            choices=[], 
+            label='Resolution Level',
+            tooltip='Select resolution level'
+        )
         self.image_switch = widgets.CheckBox(value=False,text='show panorama image')
         self.segs_switch = widgets.CheckBox(value=True,text='show/hide long segments')
         self.refresh_panorama_button = widgets.PushButton(text="refresh panorama")
@@ -154,6 +164,7 @@ class Annotator(widgets.Container):
         self.export_swc_button.clicked.connect(self.export_swc)
         self.node_type_dropdown.changed.connect(self.on_changing_type)
         self.channel.changed.connect(self.on_changing_channel)
+        self.level.changed.connect(self.on_changing_level)
         # ---------------------------
 
         # ------load default model weights-----
@@ -197,6 +208,12 @@ class Annotator(widgets.Container):
     def on_changing_channel(self,viewer):
         self.panorama_image.metadata['loaded'] = False
         self.refresh_panorama()
+    
+
+    def on_changing_level(self,viewer):
+        self.panorama_image.metadata['loaded'] = False
+        self.refresh_panorama()
+
 
     def label_undefined(self, viewer):
         if self.mode_switch.mode == 'panorama':
@@ -245,6 +262,16 @@ class Annotator(widgets.Container):
 
     def on_reading_image(self):
         self.image = wrap_image(str(self.image_path.value))
+        resolution_levels = self.image.resolution_levels
+        channels = self.image.channels
+        self.channel.changed.disconnect(self.on_changing_channel)
+        self.channel.choices = channels
+        self.channel.value = channels[0]
+        self.channel.changed.connect(self.on_changing_channel)
+        # self.level.changed.disconnect(self.on_resolution_change)
+        self.level.choices = resolution_levels
+        self.level.value = resolution_levels[0]
+        # self.level.changed.connect(self.on_resolution_change)
 
 
     def on_reading_db(self):
@@ -273,6 +300,9 @@ class Annotator(widgets.Container):
 
 
     def purge(self, viewer):
+        if self.added['edges'] != []:
+            show_info("please submit the result first")
+            return
         selection = int(self.selected_node.value)
         c_coord = self.G.nodes[selection]['coord']
 
@@ -430,7 +460,9 @@ class Annotator(widgets.Container):
         traj.reverse()
         traj_coords = [self.G.nodes[n]['coord'] for n in traj]
         [x,y,z] = traj_coords[-1]
-        img = self.image.from_roi([x-img_size//2,y-img_size//2,z-img_size//2,img_size, img_size, img_size],0,channel=int(self.channel.value))
+        channel = str(self.channel.value)
+        resolution_level = str(self.level.value)
+        img = self.image.from_roi([x-img_size//2,y-img_size//2,z-img_size//2,img_size, img_size, img_size], resolution_level, channel)
 
         displacement = self.dis_predictor.predict_displacement(traj_coords,img)
 
@@ -445,7 +477,7 @@ class Annotator(widgets.Container):
         self.G.add_edge(new_id, selection, creator = self.user_name.value)
         self.rtree.insert(new_id, tuple(new_coord + new_coord))
         self.added['nodes'].append(new_id)
-        self.added['edges'] = [[selection, new_id]]
+        self.added['edges'].append([selection, new_id])
         self.viewer.layers.selection.active = self.point_layer
         self.submit_result(self.viewer)
 
@@ -640,7 +672,9 @@ class Annotator(widgets.Container):
 
 
         if keep_image == False:
-            image = self.image.from_roi([i-self.image_size.value//2 for i in c_coord]+[self.image_size.value,self.image_size.value,self.image_size.value], level=int(self.level.value), channel=int(self.channel.value))
+            channel = str(self.channel.value)
+            resolution_level = str(self.level.value)
+            image = self.image.from_roi([i-self.image_size.value//2 for i in c_coord]+[self.image_size.value,self.image_size.value,self.image_size.value], level=resolution_level, channel=channel)
             translate = [int(i)-self.image_size.value//2 for i in c_coord]
             local_coords = np.array(coords) - np.array(translate)
             mask = np.all((local_coords >= np.array([0,0,0])) & (local_coords < np.array([self.image_size.value, self.image_size.value, self.image_size.value])), axis=1)
@@ -810,12 +844,13 @@ class Annotator(widgets.Container):
                     level = i
                     break
             # calculate scale
-            hr_image_size = self.image.info[int(self.level.value)]['image_size']
+            resolution_level = self.image.resolution_levels.index(str(self.level.value))
+            hr_image_size = self.image.info[resolution_level]['image_size']
             lr_image_size = self.image.info[level]['image_size']
             scale = [i/j for i,j in zip(hr_image_size,lr_image_size)]
 
-            image = self.image.from_roi(roi, level=level, channel=int(self.channel.value))
-            origin = self.image.info[int(self.level.value)]['origin']
+            image = self.image.from_roi(roi, level=level, channel=str(self.channel.value))
+            origin = self.image.info[resolution_level]['origin']
             self.panorama_image.data = image
             # TODO: for anisotropic image
             self.panorama_image.scale = scale
@@ -883,7 +918,8 @@ class Annotator(widgets.Container):
             'nids': np.array(nids)
         }
         
-        camera_center  = [i + j//2 for i,j in zip(self.image.rois[int(self.level.value)][0:3],self.image.rois[int(self.level.value)][3:])]
+        resolution_level = self.image.resolution_levels.index(str(self.level.value))
+        camera_center  = [i + j//2 for i,j in zip(self.image.rois[resolution_level][0:3],self.image.rois[resolution_level][3:])]
 
         self.panorama_points.visible = True
         self.panorama_points.data = np.array(coords)
