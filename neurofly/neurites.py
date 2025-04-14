@@ -30,20 +30,16 @@ class Neurites():
         for edge in edges:
             self.G.add_edge(edge['src'],edge['des'],creator = edge['creator'])
 
-        p = index.Property(dimension=3)
-        rtree_idx = index.Index(properties=p)
-
-        coords = []
         coord_ids = []
         print("loading nodes")
-        for node in tqdm(nodes):
-            coords.append(node['coord'])
+        p = index.Property(dimension=3)
+        rtree_data = []
+        for node in nodes:
             coord_ids.append(node['nid'])
-            if require_rtree:
-                rtree_idx.insert(node['nid'], tuple(node['coord']+node['coord']), obj=node)
-        self.kdtree = KDTree(np.array(coords))
+            self.G.add_node(node['nid'], nid = node['nid'], coord = node['coord'], type = node['type'], checked = node['checked'], creator = node['creator'])
+            rtree_data.append((node['nid'], tuple(node['coord']+node['coord']),None))
         self.coord_ids = coord_ids
-        self.rtree = rtree_idx
+        self.rtree = index.Index(rtree_data, properties=p)
 
     
     def get_skeleton(self,roi=None):
@@ -70,7 +66,7 @@ class Neurites():
         return mask
 
 
-    def get_segs_within(self,roi):
+    def get_segs_within(self,roi,len_thres=0):
         # get segs within roi, return a list of lists of nodes
         # 1. query nodes within roi
         # 2. generate subgraph
@@ -89,7 +85,8 @@ class Neurites():
                 continue
             path = nx.shortest_path(sub_g, source=end_nodes[0], target=end_nodes[1], weight=None, method='dijkstra') 
             path = [[i-j for i,j in zip(self.G.nodes[node]['coord'],roi[0:3])] for node in path]
-            segs.append(path)
+            if len(path)>=len_thres:
+                segs.append(path)
         # get intensity value
         intens = []
         if self.image is not None:

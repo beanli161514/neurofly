@@ -445,6 +445,10 @@ class Annotator(widgets.Container):
             show_info("current node is not the head of a valid segment")
             return
         
+        if self.added['nodes'] != [] or self.added['edges'] != []:
+            show_info("please submit the result first")
+            return
+        
         traj_len = 5
         img_size = 32
         current = selection
@@ -818,6 +822,9 @@ class Annotator(widgets.Container):
         if self.mode_switch.mode == 'labeling':
             show_info('switch to panorama mode first')
             return
+        if str(self.db_path.value) == '.':
+            show_info('please select a database file')
+            return
         if self.G is None:
             p = index.Property(dimension=3)
             # load graph and rtree from database
@@ -948,7 +955,6 @@ class Annotator(widgets.Container):
     def node_selection(self, layer, event):
         # this is appended to panorama_points layer
         if event.button == 1:
-            # remove all connected points
             index = layer.click_get_value(
                 event.position,
                 view_direction = event.view_direction,
@@ -1224,4 +1230,3 @@ class Annotator(widgets.Container):
 
             self.refresh(self.viewer)
             self.viewer.layers.selection.active = self.image_layer
-
