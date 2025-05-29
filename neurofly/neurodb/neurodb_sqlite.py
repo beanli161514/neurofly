@@ -34,7 +34,7 @@ from datetime import datetime
         }
 '''
 
-class sqliteDBIO:
+class NeurodbSQLite:
     def __init__(self, db_path):
         if db_path is not None:
             self.switch_to(db_path)
@@ -452,40 +452,42 @@ class sqliteDBIO:
         conn.close()
         return max_sid, max_version
     
-    def read_nid_within_roi(self, roi, rtree:bool=True):
+    def read_nodes_edges_within_roi(self, roi, rtree:bool=True):
         offset, size = roi[:3], roi[-3:]
         x_min, x_max = offset[0], offset[0]+size[0]-1
         y_min, y_max = offset[1], offset[1]+size[1]-1
         z_min, z_max = offset[2], offset[2]+size[2]-1
         
         conn = sqlite3.connect(self.db_path)
-        # conn.row_factory = sqlite3.Row
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='nodes_rtree'")
         rtree_exists = cursor.fetchone() is not None
         if rtree and rtree_exists:
             query = '''
-                SELECT n.nid
-                FROM nodes n
-                JOIN nodes_rtree r ON n.nid = r.id
+                SELECT n.nid, n.x, n.y, n.z
+                FROM nodes n JOIN nodes_rtree r ON n.nid = r.id
                 WHERE r.minX >= ? AND r.minX <= ?
                 AND r.minY >= ? AND r.minY <= ?
                 AND r.minZ >= ? AND r.minZ <= ?
             '''
-            cursor.execute(query, (x_min, x_max, y_min, y_max, z_min, z_max))
         else:
             # Fallback to standard range query
             query = '''
-                SELECT nid FROM nodes
+                SELECT nid, x, y, z FROM nodes
                 WHERE x BETWEEN ? AND ?
                 AND y BETWEEN ? AND ?
                 AND z BETWEEN ? AND ?
             '''
-            cursor.execute(query, (x_min, x_max, y_min, y_max, z_min, z_max))
-        nids = [row[0] for row in cursor.fetchall()]
+        cursor.execute(query, (x_min, x_max, y_min, y_max, z_min, z_max))
+        nodes = {row['nid']: [row['x'], row['y'], row['z']] for row in cursor.fetchall()}
+        nids = list(nodes.keys())
+        query = f"SELECT src, dst FROM edges WHERE src IN ({','.join(map(str, nids))}) OR dst IN ({','.join(map(str, nids))})"
+        cursor.execute(query)
+        edges = [[row['src'], row['dst']] for row in cursor.fetchall()]
         conn.close()
-        return nids
+        return nodes, edges
     
     def segs2db(self, segs, version:int=None):
         # insert segs into database

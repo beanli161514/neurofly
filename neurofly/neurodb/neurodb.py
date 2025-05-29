@@ -3,7 +3,7 @@ import networkx as nx
 import numpy as np
 from tqdm import tqdm
 
-from .sqliteDBIO import sqliteDBIO
+from .neurodb_sqlite import NeurodbSQLite
 
 class NeuroDB:
     def __init__(self, db_name:str, lazy_load_G:bool=True):
@@ -22,7 +22,7 @@ class NeuroDB:
             self._G = None
         else:
             if db_name.endswith('.db'):
-                self.DB = sqliteDBIO(db_name)
+                self.DB = NeurodbSQLite(db_name)
             else:
                 raise ValueError('Unsupported DB format.')
         
