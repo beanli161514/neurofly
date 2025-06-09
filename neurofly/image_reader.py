@@ -256,6 +256,8 @@ class Tiff():
         self.roi = [0,0,0] + list(self.image.shape)
         self.rois = [self.roi]
         self.shape = self.roi[3:6]
+        self.resolution_levels = list(["ResolutionLevel 0"])
+        self.channels = list(['Channel 0'])
     
     def __getitem__(self, indices):
         coords = [int(coord) for coord in coords]
