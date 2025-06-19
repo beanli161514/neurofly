@@ -2,7 +2,7 @@ from magicgui import widgets
 from typing import List, Tuple
 from functools import partial
 
-class ROI3DSelector(widgets.Container):
+class ROISelector(widgets.Container):
     def __init__(
         self,
         max_size: int = 512,
@@ -29,8 +29,8 @@ class ROI3DSelector(widgets.Container):
             layout="horizontal",
             labels=False
         )
-        for offset_widget in [self.x_center, self.y_center, self.z_center]:
-            offset_widget.max_width = 50
+        for center_widget in [self.x_center, self.y_center, self.z_center]:
+            center_widget.max_width = 50
         for size_widget in [self.x_size, self.y_size, self.z_size]:
             size_widget.max_width = 150
             size_widget.min_width = 80
@@ -158,4 +158,5 @@ class ROI3DSelector(widgets.Container):
         """Set the ROI using center and size."""
         self.set_center(center)
         self.set_size(size)
+        self.sync_size.value = min(size)
         self._on_power_mode_changed(self.power_mode_checkbox.value)

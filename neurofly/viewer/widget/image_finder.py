@@ -40,9 +40,13 @@ class ImageFinder(widgets.Container):
         self.image_path_widget.changed.disconnect()
         self.image_path_widget.changed.connect(on_change_callback)
     
-    def update_info(self, info: str):
+    def update_info(self, info:str, append:bool=False):
         """Update the text edit with image information."""
-        self.image_info_textEdit.value = info
+        if append:
+            current_text = self.image_info_textEdit.value
+            info = current_text + '\n' + info
+        else:
+           self.image_info_textEdit.value = info
 
     def get_image_path(self):
         path = str(self.image_path_widget.value)

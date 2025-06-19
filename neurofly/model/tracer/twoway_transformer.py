@@ -210,7 +210,7 @@ class PosPredictor():
             patch_size=4
         ).to(self.device)
 
-        checkpoint = torch.load(ckpt_path, map_location=self.device)
+        checkpoint = torch.load(ckpt_path, map_location=self.device, weights_only=False)
         model.load_state_dict(checkpoint['state_dict'])
         model.eval()
         self.model = model

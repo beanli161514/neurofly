@@ -255,7 +255,18 @@ class Tiff():
         self.image = np.squeeze(imread(tiff_path))
         self.roi = [0,0,0] + list(self.image.shape)
         self.rois = [self.roi]
-        self.shape = self.roi[3:6]
+        self.shape = self.image.shape
+        self.resolution_levels = list(['ResolutionLevel 0'])
+        self.channels = list(['Channel 0'])
+        self.info = [{
+            'level': 'ResolutionLevel 0',
+            'dims_physical': None,
+            'image_size': self.shape,
+            'data_shape': self.shape,
+            'data_chunks': None,
+            'spacing': None,
+            'origin': [0, 0, 0]
+        }]
     
     def __getitem__(self, indices):
         coords = [int(coord) for coord in coords]

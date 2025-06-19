@@ -1,6 +1,7 @@
 from magicgui import widgets
 
-class ResolutionChannelSelector(widgets.Container):
+class ResChSelector(widgets.Container):
+    """Widget for selecting resolution and channel, with buttons for level adjustment and refresh."""
     def __init__(self, **kwargs):
         self.resolution_combobox = widgets.ComboBox(
             choices=[], 

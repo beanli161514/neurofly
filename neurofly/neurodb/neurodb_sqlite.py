@@ -2,38 +2,6 @@ import os
 import sqlite3
 from datetime import datetime
 
-'''
-    segs:
-        {
-            sid: int, PRIMARY KEY
-            points: [head,...,tail],
-            sampled_points: points[::interval],
-            version: int,
-            date: str, TIMESTAMP
-        }
-    nodes:
-        {
-            nid: int, PRIMARY KEY
-            x: int
-            y: int
-            z: int
-            creator: str,
-            type: int, # 1 for Soma, 0 for normal node
-            checked: int
-            status: int, # 1 for show, 0 for hidden(removed)
-            date: str, TIMESTAMP
-        }
-    edges:
-        {
-            src: int, 
-            dst: int,
-            creator: str,
-            date: str, TIMESTAMP
-            PRIMARY KEY: (src,dst)
-            CHECK (src <= dst)
-        }
-'''
-
 class NeurodbSQLite:
     def __init__(self, db_path):
         if db_path is not None:
@@ -44,19 +12,18 @@ class NeurodbSQLite:
         db_exists = os.path.exists(db_path)
         if not db_exists:
             self.init_db()
-        else:
-            upgrade_result = self.upgrade_database_schema(db_path)
-            if not upgrade_result:
-                print("Database schema upgrade failed. Please check the database schema manually.")
-            else:
-                print("Database schema is up-to-date.")
-            # self.inspect_database()
-        self.add_spatial_index()
 
     def switch_to(self, db_path):
         self.db_path = db_path
 
     def init_db(self):
+        """Initialize the database with tables and indexes"""
+        self.init_table()
+        self.init_index()
+        self.init_spatial_index()
+        print("Database initialized successfully.")
+
+    def init_table(self):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute(
@@ -64,7 +31,6 @@ class NeurodbSQLite:
             CREATE TABLE IF NOT EXISTS segs(
                 sid INTEGER PRIMARY KEY,
                 points TEXT,
-                sampled_points TEXT,
                 version INTEGER,
                 date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -74,7 +40,6 @@ class NeurodbSQLite:
             '''
             CREATE TABLE IF NOT EXISTS nodes(
                 nid INTEGER PRIMARY KEY,
-                coord TEXT,
                 x INTEGER,
                 y INTEGER,
                 z INTEGER,
@@ -83,6 +48,7 @@ class NeurodbSQLite:
                 checked INTEGER,
                 status INTEGER,
                 sid INTEGER DEFAULT NULL,
+                cid INTEGER DEFAULT NULL,
                 date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (sid) REFERENCES segs(sid)
             )
@@ -103,14 +69,25 @@ class NeurodbSQLite:
             )
             '''
         )
+        conn.commit()
+        conn.close()
+    
+    def init_index(self):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_nodes_nid ON nodes (nid)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_nodes_checked ON nodes (checked)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes (type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_nodes_sid ON nodes (sid)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_nodes_cid ON nodes (cid)")
+
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_edges_src ON edges (src)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges (dst)")
 
         conn.commit()
         conn.close()
 
-    def add_spatial_index(self):
+    def init_spatial_index(self):
         """Add spatial indexing to an existing database"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -200,12 +177,12 @@ class NeurodbSQLite:
                 entries.append({
                     'sid': s['sid'],
                     'points': sqlite3.Binary(str(s['points']).encode()),
-                    'sampled_points': sqlite3.Binary(str(s['sampled_points']).encode()),
                     'version': s.get('version', 1),
                     'date': s.get('date', date)
                 })
             cursor.executemany(
-                "INSERT INTO segs (sid, points, sampled_points, version, date) VALUES (:sid, :points, :sampled_points, :version, :date)",
+                "INSERT INTO segs (sid, points, version, date) " \
+                "VALUES (:sid, :points, :version, :date)",
                 entries
             )
             conn.commit()
@@ -218,14 +195,19 @@ class NeurodbSQLite:
 
     def add_nodes(self, nodes:list[dict]):
         # given a list of nodes, write them to node table
-        # nodes: [{'nid', 'coord', 'creator', 'type', 'checked', 'status', 'sid', 'date'}]
+        # nodes: [{'nid', 'x', 'y', 'z', 'creator', 'type', 'checked', 'status', 'sid', 'date'}]
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
             date = datetime.now()
             entries = []
             for n in nodes:
-                x,y,z = n['coord']
+                if 'coord' in n:
+                    x,y,z = n['coord']
+                elif 'x' in n and 'y' in n and 'z' in n:
+                    x, y, z = n['x'], n['y'], n['z']
+                else:
+                    raise ValueError("Node must have 'coord' or 'x', 'y', 'z' keys")
                 entries.append({
                     'nid': n['nid'],
                     'x': int(x),
@@ -236,11 +218,12 @@ class NeurodbSQLite:
                     'checked': n['checked'],
                     'status': n['status'],
                     'sid': n.get('sid', None),
+                    'cid': n.get('cid', None),
                     'date': n.get('date', date)
                 })
             cursor.executemany(
-                "INSERT INTO nodes (nid, x, y, z, creator, type, checked, status, sid, date) " +
-                "VALUES (:nid, :x, :y, :z, :creator, :type, :checked, :status, :sid, :date)",
+                "INSERT INTO nodes (nid, x, y, z, creator, type, checked, status, sid, cid, date) " +
+                "VALUES (:nid, :x, :y, :z, :creator, :type, :checked, :status, :sid, :cid, :date)",
                 entries
             )
             conn.commit()
@@ -292,7 +275,6 @@ class NeurodbSQLite:
             seg = {
                 'sid': row['sid'],
                 'points': eval(row['points']),
-                'sampled_points': eval(row['sampled_points'])
             }
             segs.append(seg)
         conn.close()
@@ -321,6 +303,51 @@ class NeurodbSQLite:
             nodes.append(data)
         conn.close()
         return nodes
+
+    def read_nodes_edges_within_roi(self, roi, rtree:bool=True):
+        offset, size = roi[:3], roi[-3:]
+        x_min, x_max = offset[0], offset[0]+size[0]-1
+        y_min, y_max = offset[1], offset[1]+size[1]-1
+        z_min, z_max = offset[2], offset[2]+size[2]-1
+        
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='nodes_rtree'")
+        rtree_exists = cursor.fetchone() is not None
+        if rtree and rtree_exists:
+            query = '''
+                SELECT n.nid, n.x, n.y, n.z
+                FROM nodes n JOIN nodes_rtree r ON n.nid = r.id
+                WHERE r.minX >= ? AND r.minX <= ?
+                AND r.minY >= ? AND r.minY <= ?
+                AND r.minZ >= ? AND r.minZ <= ?
+            '''
+        else:
+            # Fallback to standard range query
+            query = '''
+                SELECT nid, x, y, z FROM nodes
+                WHERE x BETWEEN ? AND ?
+                AND y BETWEEN ? AND ?
+                AND z BETWEEN ? AND ?
+            '''
+        cursor.execute(query, (x_min, x_max, y_min, y_max, z_min, z_max))
+        nodes = {}
+        for row in cursor.fetchall():
+            nodes[row['nid']] = {
+                'coord': [row['x'], row['y'], row['z']],
+            }
+
+        nids = list(nodes.keys())
+        query = f"SELECT src, dst FROM edges WHERE src IN ({','.join(map(str, nids))}) OR dst IN ({','.join(map(str, nids))})"
+        cursor.execute(query)
+        edges = {}
+        for row in cursor.fetchall():
+            edges[(row['src'], row['dst'])] = {}
+            
+        conn.close()
+        return nodes, edges
     
     def read_edges(self, creator:str=None):
         conn = sqlite3.connect(self.db_path)
@@ -452,43 +479,6 @@ class NeurodbSQLite:
         conn.close()
         return max_sid, max_version
     
-    def read_nodes_edges_within_roi(self, roi, rtree:bool=True):
-        offset, size = roi[:3], roi[-3:]
-        x_min, x_max = offset[0], offset[0]+size[0]-1
-        y_min, y_max = offset[1], offset[1]+size[1]-1
-        z_min, z_max = offset[2], offset[2]+size[2]-1
-        
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='nodes_rtree'")
-        rtree_exists = cursor.fetchone() is not None
-        if rtree and rtree_exists:
-            query = '''
-                SELECT n.nid, n.x, n.y, n.z
-                FROM nodes n JOIN nodes_rtree r ON n.nid = r.id
-                WHERE r.minX >= ? AND r.minX <= ?
-                AND r.minY >= ? AND r.minY <= ?
-                AND r.minZ >= ? AND r.minZ <= ?
-            '''
-        else:
-            # Fallback to standard range query
-            query = '''
-                SELECT nid, x, y, z FROM nodes
-                WHERE x BETWEEN ? AND ?
-                AND y BETWEEN ? AND ?
-                AND z BETWEEN ? AND ?
-            '''
-        cursor.execute(query, (x_min, x_max, y_min, y_max, z_min, z_max))
-        nodes = {row['nid']: [row['x'], row['y'], row['z']] for row in cursor.fetchall()}
-        nids = list(nodes.keys())
-        query = f"SELECT src, dst FROM edges WHERE src IN ({','.join(map(str, nids))}) OR dst IN ({','.join(map(str, nids))})"
-        cursor.execute(query)
-        edges = [[row['src'], row['dst']] for row in cursor.fetchall()]
-        conn.close()
-        return nodes, edges
-    
     def segs2db(self, segs, version:int=None):
         # insert segs into database
         date = datetime.now()
@@ -502,7 +492,6 @@ class NeurodbSQLite:
             segs_entries.append({
                 'sid': max_sid,
                 'points': seg['points'],
-                'sampled_points': seg['sampled_points'],
                 'version': max_version,
                 'date': date
             })
@@ -536,111 +525,63 @@ class NeurodbSQLite:
         print(f'Adding {len(edges)} edges to database')
         self.add_edges(edges)
     
-    @staticmethod
-    def upgrade_database_schema(db_path):
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        cursor.execute("PRAGMA table_info(nodes)")
-        node_columns = {col['name']: col for col in cursor.fetchall()}
-        try:
-            if 'coord' in node_columns and ('x' not in node_columns or 'y' not in node_columns or 'z' not in node_columns):
-                print("Upgrading nodes table schema")
-                cursor.execute(
-                    '''
-                    CREATE TABLE nodes_new (
-                        nid INTEGER PRIMARY KEY,
-                        x INTEGER,
-                        y INTEGER,
-                        z INTEGER,
-                        creator TEXT,
-                        type INTEGER,
-                        checked INTEGER,
-                        status INTEGER,
-                        sid INTEGER DEFAULT NULL,
-                        date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (sid) REFERENCES segs(sid)
-                    )
-                    ''')
-                cursor.execute("SELECT * FROM nodes")
-                NODES = cursor.fetchall()
-                cursor.execute("BEGIN TRANSACTION")
-                
-                for node in NODES:
-                    coord = eval(node['coord'])
-                    x,y,z = coord
-                    cursor.execute(
-                        "INSERT INTO nodes_new (nid, x, y, z, creator, type, checked, status, date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            node['nid'], 
-                            x, y, z,
-                            node['creator'],
-                            node['type'],
-                            node['checked'],
-                            node['status'],
-                            node['date']
-                        )
-                    )
-                cursor.execute("DROP TABLE nodes")
-                cursor.execute("ALTER TABLE nodes_new RENAME TO nodes")
-                conn.commit()
-                print('Down')
+    def segs2db_with_branch(self, segs, version:int=None):
+        # insert segs into database
+        date = datetime.now()
 
-        except Exception as e:
-            conn.rollback()
-            conn.close()
-            return False
-        
-        try:
-            cursor.execute("PRAGMA table_info(edges)")
-            edge_columns = {col['name']: col for col in cursor.fetchall()}
-            if "des" in edge_columns and "dst" not in edge_columns:
-                print("Upgrading edges table schema")
-                cursor.execute(
-                    '''
-                    CREATE TABLE edges_new (
-                        src INTEGER,
-                        dst INTEGER,
-                        creator TEXT,
-                        date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (src,dst),
-                        CHECK (src <= dst)
-                    )
-                    '''
-                )
-                cursor.execute("BEGIN TRANSACTION")
-                cursor.execute("SELECT * FROM edges")
-                EDGES = cursor.fetchall()
-                for edge in EDGES:
-                    src = edge['src']
-                    dst = edge['des']
-                    if src > dst:
-                        src, dst = dst, src
-                    cursor.execute(
-                        "INSERT OR IGNORE INTO edges_new (src, dst, creator, date) VALUES (?, ?, ?, ?)",
-                        (src, dst, edge['creator'], edge['date'])
-                    )
-                cursor.execute("DROP TABLE edges")
-                cursor.execute("ALTER TABLE edges_new RENAME TO edges")
-                conn.commit()
-                print('Down')
-        except Exception as e:
-            conn.rollback()
-            conn.close()
-            return False
-        
-        try:
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_nodes_nid ON nodes (nid)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_edges_src ON edges (src)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges (dst)")
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            conn.close()
-            return False
-        conn.close()
-        return True
+        # insert segs into database
+        max_sid, max_version = self.get_max_sid_version()
+        max_version = version if version is not None else max_version+1
+        segs_entries = []
+
+        max_nid = self.get_max_nid()
+        nodes_entries = []
+        edges_entries = []
+
+        for seg in segs:
+            max_sid += 1
+            segs_entries.append({
+                'sid': max_sid,
+                'points': seg['points'],
+                'version': max_version,
+                'date': date
+            })
+            idx_nid_map = {}
+            for cidx, (coord, checked) in enumerate(zip(seg['nodes'], seg['checked'])):
+                max_nid += 1
+                x,y,z = coord
+                nodes_entries.append({
+                    'nid': max_nid,
+                    'x': int(x),
+                    'y': int(y),
+                    'z': int(z),
+                    'creator': 'seger',
+                    'type': 0,
+                    'checked': checked,
+                    'status': 1,
+                    'sid': max_sid,
+                    'cid': max_sid,
+                    'date': date
+                })
+                idx_nid_map[cidx] = max_nid
+            for src_idx, dst_idx in seg['edges']:
+                src_nid = idx_nid_map[src_idx]
+                dst_nid = idx_nid_map[dst_idx]
+                if src_nid > dst_nid:
+                    src_nid, dst_nid = dst_nid, src_nid
+                edges_entries.append({
+                    'src': src_nid,
+                    'dst': dst_nid,
+                    'creator': 'seger',
+                    'date': date
+                })
+
+        self.add_segs(segs_entries)
+        print(f'Number of segs in database: {max_sid}; {len(segs_entries)} newly added.')
+        self.add_nodes(nodes_entries)
+        print(f'Adding {len(nodes_entries)} nodes to database')
+        self.add_edges(edges_entries)
+        print(f'Adding {len(edges_entries)} edges to database')
 
     def inspect_database(self):
         conn = sqlite3.connect(self.db_path)
@@ -682,4 +623,41 @@ class NeurodbSQLite:
         
         print("==== ==== ==== ==== ==== ====\n")
         conn.close()
+    
+    def read_tasks(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        query = """
+                WITH 
+                SegLen AS (
+                    SELECT sid, COUNT(*) AS seg_len 
+                    FROM nodes 
+                    GROUP BY sid
+                )
+                SELECT n.nid, n.x, n.y, n.z, s.seg_len 
+                FROM nodes n JOIN SegLen s ON n.sid = s.sid
+                WHERE n.checked=-1
+                ORDER BY s.seg_len DESC
+            """
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        tasks = []
+        for row in rows:
+            tasks.append({
+                'nid': row['nid'],
+                'coord': [row['x'], row['y'], row['z']],
+                'seg_len': row['seg_len']
+            })
+        conn.close()
+        return tasks
+    
+if __name__ == "__main__":
+    db_path = '/home/ryuuyou/Project/neurofly_dev/test/seg_dev_test/out/test.db'
+    neurodb = NeurodbSQLite(db_path)
+    tasks = neurodb.read_tasks()
+    print(f"Number of tasks: {len(tasks)}")
+    for task in tasks[0:10]:
+        print(task)
+
     
