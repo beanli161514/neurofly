@@ -5,6 +5,8 @@ class Action():
             self.action_type = action_type
         else:
             raise Exception("Invalid action type!")
+        self.task_nid = None
+        self.task_coord = None
         self.nodes = nodes
         self.edges = edges
         self.history = None

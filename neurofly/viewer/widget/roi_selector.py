@@ -47,21 +47,21 @@ class ROISelector(widgets.Container):
             labels=False,
             **kwargs
         )
-        self._set_callbacks()
+        self._add_callback()
     
-    def _set_callbacks(self):
+    def _add_callback(self):
         """Set up callbacks for the widgets."""
-        self._set_xyz_center_callbacks()
+        self._set_xyz_center_callback()
         if not self.sync_mode_checkbox.value:
-            self._set_xyz_size_callbacks(True)
-        self._set_control_callbacks()
+            self._set_xyz_size_callback(True)
+        self._set_control_callback()
     
-    def _set_xyz_center_callbacks(self):
+    def _set_xyz_center_callback(self):
         """Set callbacks for the center widgets to validate and clip values."""
         for widget in [self.x_center, self.y_center, self.z_center]:
             widget.native.editingFinished.connect(partial(self._validate_value, widget))
 
-    def _set_xyz_size_callbacks(self, enabled):
+    def _set_xyz_size_callback(self, enabled):
         """Set callbacks for the size widgets to validate and clip values."""
         if enabled:
             for widget in [self.x_size, self.y_size, self.z_size]:
@@ -72,7 +72,7 @@ class ROISelector(widgets.Container):
                 widget.enabled = False
                 widget.changed.disconnect()
     
-    def _set_control_callbacks(self):
+    def _set_control_callback(self):
         """Set callbacks for the control widgets."""
         self.power_mode_checkbox.changed.connect(self._on_power_mode_changed)
         self.sync_mode_checkbox.changed.connect(self._on_sync_mode_changed)
@@ -123,10 +123,10 @@ class ROISelector(widgets.Container):
             self.sync_size.enabled = True
             min_size = min(self.x_size.value, self.y_size.value, self.z_size.value)
             self.sync_size.value = min_size
-            self._set_xyz_size_callbacks(False)
+            self._set_xyz_size_callback(False)
         else:
             self.sync_size.enabled = False
-            self._set_xyz_size_callbacks(True)
+            self._set_xyz_size_callback(True)
     
     def _on_sync_size_changed(self, widget, new_value=None):
         """Synchronize the size of the ROI when sync size mode is enabled."""

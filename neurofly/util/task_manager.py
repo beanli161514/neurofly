@@ -7,6 +7,8 @@ class TaskManager():
         self.db_path = db_path
         self.DB = NeurodbSQLite(db_path) if db_path else None
         self.G = NeuroGraph()
+        self.task_node = None
+        self.action_node = None
 
         self.action_stack:list[Action] = []
 

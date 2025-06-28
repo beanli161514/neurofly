@@ -51,7 +51,7 @@ class SimpleViewer(widgets.Container):
 
     def add_callback(self):
         """Add callbacks to the widgets and layers."""
-        self.ImageFinder.reset_image_path_widget_callbacks(self.on_image_reading)
+        self.ImageFinder.reset_image_path_widget_callback(self.on_image_reading)
         self.ResChSelector.reset_button_callbacks(self.level_up, self.level_down, self.refresh)
         self.image_layer.mouse_double_click_callbacks.append(self.on_double_click)
 
@@ -171,7 +171,7 @@ class SimpleViewer(widgets.Container):
 
     def on_double_click(self, layer:napari.layers.Layer, event):
         """Callback for double-click events on the image layer."""
-        if(event.button==1):
+        if event.button==1:
             max_point = self.get_click_position(layer, event)
             print('Put point at: ', max_point)
             self.ROISelector.set_center(max_point)

@@ -35,7 +35,7 @@ class ImageFinder(widgets.Container):
             **kwargs
         )
 
-    def reset_image_path_widget_callbacks(self, on_change_callback):
+    def reset_image_path_widget_callback(self, on_change_callback):
         """Reset the callback for the image path widget."""
         self.image_path_widget.changed.disconnect()
         self.image_path_widget.changed.connect(on_change_callback)

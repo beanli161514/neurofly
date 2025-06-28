@@ -54,10 +54,10 @@ class NeuronReconstructor(SimpleViewer):
     def add_callback(self):
         """Add callbacks to the widgets and layers."""
         super().add_callback()
-        self.RecWidgets.reset_database_path_widget_callbacks(self.on_db_loading)
-        self.RecWidgets.reset_deconv_button_callbacks(self.deconvolve)
-        self.RecWidgets.reset_revoke_button_callbacks(self.revoke)
-        self.RecWidgets.reset_next_task_button_callbacks(self.next_task)
+        self.RecWidgets.reset_database_path_widget_callback(self.on_db_loading)
+        self.RecWidgets.reset_deconv_button_callback(self.deconvolve)
+        self.RecWidgets.reset_revoke_button_callback(self.revoke)
+        self.RecWidgets.reset_next_task_button_callback(self.next_task)
 
 
         self.nodes_layer.click_get_value = self.nodes_layer.get_value
@@ -178,24 +178,30 @@ class NeuronReconstructor(SimpleViewer):
         if index is not None:
             nid = int(layer.properties['nids'][index])
             coord = layer.data[index]
-            self.action_node = nid
-            print(f"selected node {index}: {self.action_node} {layer.data[index]}")
-            is_successed = False
-            if event.button == 1:
-                # add path
-                nodes, edges = self.trace_astar(
-                    src_node={'nid': self.task_node, 'coord': self.G.nodes[self.task_node]['coord']},
-                    dst_node={'nid': nid, 'coord': coord}
-                )
-                action = Action('add_path', nodes=nodes, edges=edges)
-                is_successed = self.TaskManager.action_stack_push(action)
-            elif event.button == 2:
-                # delete node
-                nodes = {nid: {'coord': coord}}
-                action = Action('delete_nodes', nodes=nodes)
-                is_successed = self.TaskManager.action_stack_push(action)
-            if is_successed:
-                self.render(init_graph=False)
+            if 'Shift' in event.modifiers:
+                if event.button == 1:
+                    self.task_node = nid
+                    self.ROISelector.set_center(coord)
+                    self.refresh()
+            else:
+                self.action_node = nid
+                print(f"selected node {index}: {self.action_node} {layer.data[index]}")
+                is_successed = False
+                if event.button == 1:
+                    # add path
+                    nodes, edges = self.trace_astar(
+                        src_node={'nid': self.task_node, 'coord': self.G.nodes[self.task_node]['coord']},
+                        dst_node={'nid': nid, 'coord': coord}
+                    )
+                    action = Action('add_path', nodes=nodes, edges=edges)
+                    is_successed = self.TaskManager.action_stack_push(action)
+                elif event.button == 2:
+                    # delete node
+                    nodes = {nid: {'coord': coord}}
+                    action = Action('delete_nodes', nodes=nodes)
+                    is_successed = self.TaskManager.action_stack_push(action)
+                if is_successed:
+                    self.render(init_graph=False)
         
     
     def edge_selection(self, layer: napari.layers.Vectors, event, threshold=2.0):
