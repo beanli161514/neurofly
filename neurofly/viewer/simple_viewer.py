@@ -27,7 +27,7 @@ class SimpleViewer(widgets.Container):
         self.viewer.layers.clear()
         self.viewer.window.remove_dock_widget('all')
         self.image_layer = self.viewer.add_image(np.zeros((64, 64, 64), dtype=np.uint16), name='image')
-        self.goal_layer = self.viewer.add_points(ndim=3, face_color='red', size=1, shading='spherical',name='goal')        
+        self.goal_layer = self.viewer.add_points(ndim=3, symbol='ring', face_color='red', size=1, shading='spherical',name='goal')        
 
         if type(self) is SimpleViewer:
             self.init_attributes()

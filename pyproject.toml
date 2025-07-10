@@ -1,9 +1,10 @@
 [project]
 name = "neurofly"
-version = "0.1.4"
+version = "0.1.5"
 description = "A framework to annotate single neurons at whole-brain scale"
 authors = [
-    { name="Rubin Zhao", email="beanli161514@gmail.com" }
+    { name="Rubin Zhao", email="beanli161514@gmail.com" },
+    { name="Yang Liu", email="ryuuyou0529@gmail.com"}
 ]
 license = { text = "GPL-3.0-or-later" }
 readme = "README.md"
@@ -55,10 +56,10 @@ where = "neurofly"
 neurofly = "neurofly:napari.yaml"
 
 # Entry points for console scripts (from setup.py)
-[project.scripts]
-seg = "neurofly.seger:command_line_interface"
-aug = "neurofly.aug_segs:command_line_interface"
-interp = "neurofly.interp_edges:command_line_interface"
+#[project.scripts]
+# seg = "neurofly.seger:command_line_interface"
+# aug = "neurofly.aug_segs:command_line_interface"
+# interp = "neurofly.interp_edges:command_line_interface"
 
 
 [build-system]

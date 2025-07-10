@@ -1,6 +1,10 @@
+import collections.abc
 import os
+import collections
 import sqlite3
+import json
 from datetime import datetime
+from ..backend.action import Action
 
 class NeurodbSQLite:
     def __init__(self, db_path):
@@ -9,9 +13,9 @@ class NeurodbSQLite:
         else:
             return
         
-        db_exists = os.path.exists(db_path)
-        if not db_exists:
-            self.init_db()
+        # db_exists = os.path.exists(db_path)
+        # if not db_exists:
+        self.init_db()
 
     def switch_to(self, db_path):
         self.db_path = db_path
@@ -21,6 +25,7 @@ class NeurodbSQLite:
         self.init_table()
         self.init_index()
         self.init_spatial_index()
+        self.init_action_table_with_index()
         print("Database initialized successfully.")
 
     def init_table(self):
@@ -74,19 +79,37 @@ class NeurodbSQLite:
         conn.commit()
         conn.close()
     
-    def init_action_table(self):
+    def init_action_table_with_index(self):
         """Initialize the action table for tracking changes"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute(
             '''
             CREATE TABLE IF NOT EXISTS actions(
-                action_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                action_type TEXT,
+                aid INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT,
+                task_nid INTEGER,
+                task_node TEXT,
+                action_nid INTEGER DEFAULT NULL,
+                action_node TEXT,
+                action_edge_src INTEGER DEFAULT NULL,
+                action_edge_dst INTEGER DEFAULT NULL,
+                path_nodes TEXT,
+                path_edges TEXT,
+                creator TEXT DEFAULT 'tester',
+                history TEXT,
                 date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (task_nid) REFERENCES nodes(nid),
+                FOREIGN KEY (action_nid) REFERENCES nodes(nid),
+                FOREIGN KEY (action_edge_src) REFERENCES nodes(nid),
+                FOREIGN KEY (action_edge_dst) REFERENCES nodes(nid)
             )
             '''
         )
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_actions_task_nid ON actions (task_nid)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_actions_action_nid ON actions (action_nid)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_actions_type ON actions (type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_actions_creator ON actions (creator)")
         conn.commit()
         conn.close()
     
@@ -193,12 +216,12 @@ class NeurodbSQLite:
                 seg_data: dict
                 entries.append({
                     'sid': sid,
-                    'points': sqlite3.Binary(str(seg_data['points']).encode()),
+                    'points': json.dumps(seg_data['points']),
                     'version': seg_data.get('version', 1),
                     'date': seg_data.get('date', date)
                 })
             cursor.executemany(
-                "INSERT INTO segs (sid, points, version, date) " \
+                "INSERT INTO segs (sid, points, version, date) " + 
                 "VALUES (:sid, :points, :version, :date)",
                 entries
             )
@@ -220,7 +243,10 @@ class NeurodbSQLite:
             entries = []
             for nid, node_data in nodes.items():
                 node_data: dict
-                x, y, z = node_data['x'], node_data['y'], node_data['z']
+                if 'coord' in node_data:
+                    x, y, z = node_data['coord']
+                elif 'x' in node_data and 'y' in node_data and 'z' in node_data: 
+                    x, y, z = node_data['x'], node_data['y'], node_data['z']
                 entries.append({
                     'nid': nid,
                     'x': int(x),
@@ -229,7 +255,7 @@ class NeurodbSQLite:
                     'creator': node_data['creator'],
                     'type': node_data['type'],
                     'checked': node_data['checked'],
-                    'status': node_data['status'],
+                    'status': node_data.get('status', 1),
                     'sid': node_data.get('sid', None),
                     'cid': node_data.get('cid', None),
                     'date': node_data.get('date', date)
@@ -241,11 +267,11 @@ class NeurodbSQLite:
             )
             conn.commit()
             conn.close()
-        except Exception as e:
-            print(f"Error in add_nodes: {e}")
+        except Exception as E:
+            print(f"Error in add_nodes: {E}")
             conn.rollback()
             conn.close()
-            raise e
+            raise E
 
     def add_edges(self, edges:dict):
         # given list of edges, write them to edges table
@@ -271,11 +297,140 @@ class NeurodbSQLite:
             )
             conn.commit()
             conn.close()
-        except Exception as edge_data:
-            print(f"Error in add_edges: {edge_data}")
+        except Exception as E:
+            print(f"Error in add_edges: {E}")
             conn.rollback()
             conn.close()
-            raise edge_data
+            raise E
+    
+    def add_actions(self, actions:list):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            date = datetime.now()
+            entries = []
+            for action in actions:
+                action: Action
+                entries.append({
+                    'type': action.action_type,
+                    'task_nid': action.task_node['nid'],
+                    'task_node': json.dumps(action.task_node),
+                    'action_nid': action.action_node['nid'] if action.action_node else None,
+                    'action_node': json.dumps(action.action_node) if action.action_node else None,
+                    'action_edge_src': action.action_edge['src'] if action.action_edge else None,
+                    'action_edge_dst': action.action_edge['dst'] if action.action_edge else None,
+                    'path_nodes': json.dumps(action.path_nodes) if action.path_nodes else None,
+                    'path_edges': json.dumps(action.path_edges) if action.path_edges else None,
+                    'creator': action.creator,
+                    'history': json.dumps(action.history) if action.path_edges else None,
+                    'date': date
+                })
+            cursor.executemany(
+                "INSERT INTO actions " +
+                    "(type, task_nid, task_node, action_nid, action_node, action_edge_src, action_edge_dst, " +
+                        "path_nodes, path_edges, creator, history, date) " +
+                "VALUES (:type, :task_nid, :task_node, :action_nid, :action_node, :action_edge_src, :action_edge_dst, " +
+                        ":path_nodes, :path_edges, :creator, :history, :date)",
+                entries
+            )
+            conn.commit()
+            conn.close()
+        except Exception as E:
+            print(f"Error in add_actions: {E}")
+            conn.rollback()
+            conn.close()
+            raise E
+    
+    def read_nodes(self, nids:list):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        query = f"SELECT * FROM nodes WHERE nid IN ({','.join('?' for _ in nids)})"
+        cursor.execute(query, nids)
+        rows = cursor.fetchall()
+        nodes = {}
+        for row in rows:
+            nid = row['nid']
+            nodes[nid] = {
+                'nid': nid,
+                'coord': [row['x'], row['y'], row['z']],
+                'creator': row['creator'],
+                'type': row['type'],
+                'checked': row['checked'],
+                'status': row['status'],
+                'sid': row['sid'],
+                'cid': row['cid'],
+                'date': row['date']
+            }
+        conn.close()
+        return nodes
+
+    def read_one_node(self, nid:int):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM nodes WHERE nid=?", (nid,))
+        row = cursor.fetchone()
+        if row is None:
+            conn.close()
+            return None
+        node = {
+            'nid': row['nid'],
+            'coord': [row['x'], row['y'], row['z']],
+            'creator': row['creator'],
+            'type': row['type'],
+            'checked': row['checked'],
+            'status': row['status'],
+            'sid': row['sid'],
+            'cid': row['cid'],
+            'date': row['date']
+        }
+        conn.close()
+        return node
+    
+    def read_edges_by_nids(self, nids:list):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        placeholders = ','.join('?' for _ in nids)
+        query = f"SELECT * FROM edges WHERE src IN ({placeholders}) OR dst IN ({placeholders})"
+        cursor.execute(query, nids + nids)
+        
+        edges = {}
+        for row in cursor.fetchall():
+            src, dst = row['src'], row['dst']
+            edges[(src, dst)] = {
+                'creator': row['creator'],
+                'date': row['date']
+            }
+        conn.close()
+        return edges
+
+    def read_one_edge(self, src:int, dst:int=None):
+        if dst is None:
+            dst = src
+            query = "SELECT * FROM edges WHERE src=? OR dst=?"
+        else:
+            if src > dst:
+                src, dst = dst, src
+            query = "SELECT * FROM edges WHERE src=? AND dst=?"
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(query, (src, dst))
+        row = cursor.fetchone()
+        if row is None:
+            conn.close()
+            return None
+        edge = {
+            'src': row['src'],
+            'dst': row['dst'],
+            'creator': row['creator'],
+            'date': row['date']
+        }
+        conn.close()
+        return edge
 
     def read_nodes_edges_within_roi(self, roi, rtree:bool=True):
         offset, size = roi[:3], roi[-3:]
@@ -322,6 +477,46 @@ class NeurodbSQLite:
         conn.close()
         return nodes, edges
     
+    def read_connected_components(self, nid:int, with_edges:bool=False):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        query = """
+            WITH RECURSIVE connected_nodes(nid) AS (
+                -- Base case: start with the given node
+                SELECT ? AS nid
+                
+                UNION
+                
+                -- Recursive case: find all directly connected nodes
+                SELECT CASE 
+                    WHEN e.src = cn.nid THEN e.dst
+                    ELSE e.src
+                END AS nid
+                FROM connected_nodes cn
+                JOIN edges e ON (e.src = cn.nid OR e.dst = cn.nid)
+            )
+            SELECT DISTINCT cn.nid, n.x, n.y, n.z
+            FROM connected_nodes cn
+            JOIN nodes n ON cn.nid = n.nid
+            ORDER BY cn.nid;
+        """
+        cursor.execute(query, (nid,))
+        nodes = {}
+        for row in cursor.fetchall():
+            nid = row['nid']
+            nodes[nid] = {
+                'nid': nid,
+                'coord': [row['x'], row['y'], row['z']],
+            }
+        conn.close()
+        if with_edges:
+            nids = list(nodes.keys())
+            edges = self.read_edges_by_nids(nids)
+            return nodes, edges
+        else:
+            return nodes
+    
     def delete_nodes(self, nids):
         # given a list of nid, delete nodes from nodes table and edges from edges table
         conn = sqlite3.connect(self.db_path)
@@ -338,11 +533,11 @@ class NeurodbSQLite:
             conn.close()
             raise e
 
-    def delete_edges(self, edges):
+    def delete_edges(self, src_dst):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
-            for src, dst in edges:
+            for src, dst in src_dst:
                 if src > dst:
                     src, dst = dst, src
                 cursor.execute("DELETE FROM edges WHERE src=? AND dst=?", (src, dst))
@@ -364,51 +559,63 @@ class NeurodbSQLite:
         try:
             update_parts = []
             where_conditions = []
-            params = []
+            update_params = []
+            condition_params = []
+            
             if creator is not None:
                 update_parts.append("creator = ?")
                 where_conditions.append("(creator IS NULL OR creator != ?)")
-                params.extend([creator, creator])
+                update_params.append(creator)
+                condition_params.append(creator)
             if type is not None:
                 update_parts.append("type = ?")
                 where_conditions.append("(type IS NULL OR type != ?)")
-                params.extend([type, type])
+                update_params.append(type)
+                condition_params.append(type)
             if checked is not None:
                 update_parts.append("checked = ?")
                 where_conditions.append("(checked IS NULL OR checked != ?)")
-                params.extend([checked, checked])
+                update_params.append(checked)
+                condition_params.append(checked)
             if status is not None:
                 update_parts.append("status = ?")
                 where_conditions.append("(status IS NULL OR status != ?)")
-                params.extend([status, status])
+                update_params.append(status)
+                condition_params.append(status)
             if cid is not None:
                 update_parts.append("cid = ?")
                 where_conditions.append("(cid IS NULL OR cid != ?)")
-                params.extend([cid, cid])
+                update_params.append(cid)
+                condition_params.append(cid)
             if date is None:
                 date = datetime.now()
             update_parts.append("date = ?")
-            params.append(date)
+            update_params.append(date)
             
             placeholders = ','.join('?' for _ in nids)
             if where_conditions:
                 additional_conditions = f" AND ({' OR '.join(where_conditions)})"
                 query = f"UPDATE nodes SET {', '.join(update_parts)} WHERE nid IN ({placeholders}){additional_conditions}"
+                # Correct parameter order: UPDATE params + nids + condition params
+                params = update_params + nids + condition_params
             else:
                 query = f"UPDATE nodes SET {', '.join(update_parts)} WHERE nid IN ({placeholders})"
-            params.extend(nids)
-            
+                params = update_params + nids
+
             cursor.execute(query, params)
+            # rows_affected = cursor.rowcount
+            # print(f"Rows affected: {rows_affected}")
             conn.commit()
             conn.close()
+
         except Exception as e:
             print(f"Error in update_nodes: {e}")
             conn.rollback()
             conn.close()
             raise e
     
-    def check_node(self, nid:int, date:datetime=None):
-        self.update_nodes([nid], checked=1, date=date)
+    def check_nodes(self, nids:list[int], date:datetime=None):
+        self.update_nodes(nids, checked=1, date=date)
     
     def uncheck_nodes(self, nids:list[int], date:datetime=None):
         self.update_nodes(nids, checked=-1, date=date)
@@ -522,7 +729,7 @@ class NeurodbSQLite:
         cursor.execute(query)
         rows = cursor.fetchall()
         tasks = []
-        for row in rows:
+        for i, row in enumerate(rows):
             tasks.append({
                 'nid': row['nid'],
                 'coord': [row['x'], row['y'], row['z']],
@@ -531,12 +738,5 @@ class NeurodbSQLite:
         conn.close()
         return tasks
     
-if __name__ == "__main__":
-    db_path = '/home/ryuuyou/Project/neurofly_dev/test/seg_dev_test/out/test.db'
-    neurodb = NeurodbSQLite(db_path)
-    tasks = neurodb.read_tasks()
-    print(f"Number of tasks: {len(tasks)}")
-    for task in tasks[0:10]:
-        print(task)
 
     

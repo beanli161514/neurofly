@@ -1,0 +1,26 @@
+name: neurofly
+display_name: neurofly
+visibility: public
+contributions:
+  commands:
+    - id: neurofly.segs_annotator
+      title: Segs Annotator
+      python_name: neurofly:Annotator
+    - id: neurofly.simple_viewer
+      title: Simple Viewer
+      python_name: neurofly:SimpleViewer
+    - id: neurofly.skel_annotator
+      title: Skeleton Annotator
+      python_name: neurofly:SkelAnnotator
+    - id: neurofly.neuron_seger
+      title: Neuron Seger
+      python_name: neurofly:NeuronSeger
+  widgets:
+    - command: neurofly.segs_annotator
+      display_name: Segs Annotator
+    - command: neurofly.simple_viewer
+      display_name: Simple Viewer
+    - command: neurofly.skel_annotator
+      display_name: Skeleton Annotator
+    - command: neurofly.neuron_seger
+      display_name: Neuron Seger

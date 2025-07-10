@@ -21,7 +21,7 @@ class ResChSelector(widgets.Container):
         self.combobox_row = widgets.Container(
             widgets=[self.resolution_combobox, self.channel_combobox],
             layout='horizontal',
-            labels=True
+            labels=False
         )
         self.level_button_row = widgets.Container(
             widgets=[self.level_up_button, self.level_down_button],
