@@ -7,6 +7,7 @@ class NeuroGraph():
         self.nodes = self.graph.nodes
         self.edges = self.graph.edges
 
+        self.temp_max_nid = 0
         self.init_graph(nodes, edges)
 
     def init_graph(self, nodes:dict, edges:dict):
@@ -15,6 +16,13 @@ class NeuroGraph():
             self.add_nodes(nodes)
         if edges is not None:
             self.add_edges(edges)
+    
+    def get_neg_temp_max_nid(self):
+        return self.temp_max_nid
+
+    def set_neg_temp_max_nid(self, nid:int):
+        if nid > self.temp_max_nid:
+            self.temp_max_nid = nid
 
     def add_nodes(self, nodes:dict):
         for nid, data in nodes.items():

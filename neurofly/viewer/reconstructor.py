@@ -36,9 +36,7 @@ class NeuronReconstructor(SimpleViewer):
         """Initialize attributes for the NeuronReconstructor."""
         super().init_attributes()
 
-        self.DB = None
         self.TaskManager = None
-        self.G = None
 
         self.RecWidgets = RecWidgets()
         self.extend([self.RecWidgets])
@@ -54,6 +52,7 @@ class NeuronReconstructor(SimpleViewer):
         self.RecWidgets.reset_deconv_button_callback(self.on_deconv_clicked)
         self.RecWidgets.reset_revoke_button_callback(self.revoke)
         self.RecWidgets.reset_next_task_button_callback(self.next_task)
+        self.RecWidgets.reset_last_task_button_callback(self.last_task)
         self.RecWidgets.reset_submit_button_callback(self.submit)
 
 
@@ -68,12 +67,11 @@ class NeuronReconstructor(SimpleViewer):
     def on_db_loading(self):
         db_path = self.RecWidgets.get_database_path()
         self.TaskManager = TaskManager(db_path)
-        self.DB = self.TaskManager.DB
-        self.G = self.TaskManager.G
         self.task_node = self.TaskManager.task_node
         self.action_node = self.TaskManager.action_node
 
         self.render(init_graph=True)
+        super().refresh(self.get_info())
 
     def on_deconv_clicked(self):
         size = list(self.image_layer.data.shape)
@@ -98,28 +96,58 @@ class NeuronReconstructor(SimpleViewer):
         self.TaskManager.submit()
         self.next_task()
         self.RecWidgets.on_check_button_clicked()
+    
+    def get_task_info(self):
+        task_nid = self.TaskManager.task_node['nid'] if self.TaskManager.task_node else None
+        unchecked_length = len(self.TaskManager.TASKS['unchecked_list'])
+        checked_length = len(self.TaskManager.TASKS['checked_list'])
+        info = f"Task Node ID: {task_nid}\n"
+        info += f"Unchecked Tasks: {unchecked_length}\n"
+        info += f"Checked Tasks: {checked_length}\n"
+        return info
+
+    def get_info(self):
+        """Get the information to be displayed in the ImageFinder widget."""
+        image_info = self.get_image_info()
+        task_info = self.get_task_info()
+        info = f"{image_info}\n--------\n{task_info}"
+        return info
 
     def next_task(self):
-        nid, coord, seg_len = self.TaskManager.get_next_task()
-        if nid is None:
+        task = self.TaskManager.get_next_task()
+        if task is None:
             napari.utils.notifications.show_info("No more tasks available.")
             return
-        self.ROISelector.set_center(coord)
+        self.ROISelector.set_center(task['coord'])
         self.refresh()
-        self.TaskManager.action_stack_clear()
+    
+    def last_task(self):
+        task = self.TaskManager.get_last_task()
+        if task is None:
+            napari.utils.notifications.show_info("No last task available.")
+            return
+        self.ROISelector.set_center(task['coord'])
+        self.refresh()
     
     def refresh(self):
+        # update graph
         self.render(init_graph=True)
+        # then update image
         if self.TaskManager:
             self.TaskManager.action_stack_clear()
-        super().refresh()
+            super().refresh(self.get_info())
+        else:
+            super().refresh()
     
     def render(self, *, init_graph:bool):
         # clear layers
-        if self.resolution_level != 0 or not self.DB:
+        if self.resolution_level != 0 or self.TaskManager is None:
             self.nodes_layer.data = np.zeros((0, 3))
             self.edges_layer.data = np.empty((0, 2, 3))
             return
+    
+        elif self.resolution_level != 0 and self.task_node is not None:
+            self.TaskManager.reset_task_status()
         
         # logic: update graph in TaskManager
         if init_graph:
@@ -129,7 +157,7 @@ class NeuronReconstructor(SimpleViewer):
         
         # visual: update layers
         self.task_node = self.TaskManager.task_node if self.TaskManager.task_node else None
-        nodes_coords, nodes_properties, edges_coords, edges_properties = self.G.get_connected_components(self.task_node)
+        nodes_coords, nodes_properties, edges_coords, edges_properties = self.TaskManager.G.get_connected_components(self.task_node)
         self.nodes_layer.data = nodes_coords
         self.nodes_layer.properties = nodes_properties
         self.nodes_layer.size = nodes_properties['sizes']
@@ -142,23 +170,25 @@ class NeuronReconstructor(SimpleViewer):
         # control: update widgets
         self.RecWidgets.set_node_type_idx(self.task_node['type'] if self.task_node else 0)
         
-    def trace_astar(self, src_node, dst_node, interval=3):
+    def trace_astar(self, src_node, dst_node, interval=3, *, new_dst_node:bool=True):
         # sample function to sample the path at a given interval
-        def __sample_path__(path, interval):
+        def __sample_path__(path, interval, with_end):
             sample_idxs = list(range(interval, len(path)-1, interval))
             if sample_idxs and sample_idxs[-1] == len(path)-2:
                 sample_idxs.pop()
+            if with_end:
+                sample_idxs.append(len(path)-1)
             return [path[i] for i in sample_idxs]
         
         nodes = {}
         edges = {}
-        src_nid, src_coord = src_node['nid'], src_node['coord']
-        dst_nid, dst_coord = dst_node['nid'], dst_node['coord']
+        src_nid, src_coord = src_node['nid'], np.asarray(src_node['coord'])
+        dst_nid, dst_coord = dst_node['nid'], np.asarray(dst_node['coord'])
         center = (src_coord + dst_coord) // 2
         distance = np.linalg.norm(src_coord - dst_coord)
         # if distance is small, just connect the nodes directly
         if distance <= 5:
-            edges[(src_nid, dst_nid)]
+            edges[(src_nid, dst_nid)] = {}
         # if distance is large, use A* algorithm to find the path
         else:
             size = round(distance) + 8
@@ -166,21 +196,54 @@ class NeuronReconstructor(SimpleViewer):
             roi = [int(offset[i]) for i in range(3)] + [size, size, size]
             img = self.IMAGE.from_roi(roi)
             tracer = NBAStarSearch(img, start_point=src_coord-offset, goal_point=dst_coord-offset)
-            path = tracer.search()
-            sampled_path = __sample_path__(path, interval)
+            path_coord = tracer.search()
+            sampled_path = __sample_path__(path_coord, interval, with_end=new_dst_node)
             if len(sampled_path) == 0:
                 edges[(src_nid, dst_nid)] = {}
             else:
-                nids = []
+                neg_temp_nids = []
+                neg_temp_max_nid = self.TaskManager.G.get_neg_temp_max_nid()
                 for i, coord in enumerate(sampled_path):
-                    nids.append(-(i + 1))
-                    nodes[nids[-1]] = {
+                    _neg_temp_nid = -(neg_temp_max_nid + i + 1)
+                    neg_temp_nids.append(_neg_temp_nid)
+                    nodes[neg_temp_nids[-1]] = {
                         'coord': coord+offset,
                     }
-                nids = [src_nid] + nids + [dst_nid]
-                for _src, _dst in zip(nids[:-1], nids[1:]):
+                    neg_temp_max_nid += 1
+                self.TaskManager.G.set_neg_temp_max_nid(neg_temp_max_nid)
+                neg_temp_nids = [src_nid] + neg_temp_nids + [dst_nid]
+                for _src, _dst in zip(neg_temp_nids[:-1], neg_temp_nids[1:]):
                     edges[(_src, _dst)] = {}
         return nodes, edges
+    
+    def action_select_task_node(self, nid:int):
+        self.task_node = self.TaskManager.set_task_node(nid)
+        self.ROISelector.set_center(self.task_node['coord'])
+        return True
+
+    def action_add_path(self, task_node:dict, action_node:dict, new_action_node:bool):
+        path_nodes, path_edges = self.trace_astar(
+            src_node={'nid': task_node['nid'], 'coord': task_node['coord']},
+            dst_node={'nid': action_node['nid'], 'coord': action_node['coord']},
+            new_dst_node=new_action_node
+        )
+        action = Action(self.RecWidgets.get_username(), task_node, 'add_path', 
+                        action_node=action_node, action_edge=None,
+                        path_nodes=path_nodes, path_edges=path_edges)
+        is_successed = self.TaskManager.action_stack_push(action)
+        return is_successed
+    
+    def action_delete_node(self, task_node:dict, action_node:dict):
+        action = Action(self.RecWidgets.get_username(), task_node, 'delete_node', 
+                        action_node=action_node, action_edge=None)
+        is_successed = self.TaskManager.action_stack_push(action)
+        return is_successed
+
+    def action_delete_edge(self, task_node:dict, action_node:dict, action_edge:dict):
+        action = Action(self.RecWidgets.get_username(), task_node, 'delete_edge', 
+                        action_node=action_node, action_edge=action_edge)
+        is_successed = self.TaskManager.action_stack_push(action)
+        return is_successed
 
     def node_operation(self, layer:napari.layers.Points, event):
         index = layer.click_get_value(
@@ -189,35 +252,55 @@ class NeuronReconstructor(SimpleViewer):
             dims_displayed=event.dims_displayed,
             world=True,
         )
+        # if clicked on a existing node
         if index is not None:
             nid = int(layer.properties['nids'][index])
-            coord = layer.data[index]
             if 'Shift' in event.modifiers:
+                # if Shift is pressed, select a task node
                 if event.button == 1:
-                    self.task_node = self.TaskManager.set_task_node(nid)
-                    self.ROISelector.set_center(coord)
+                    is_successed = self.action_select_task_node(nid)
+                    print(f'[Action] select task node: {nid}')
+                if is_successed:
                     self.refresh()
+                    print(f'refresh')
             else:
-                print(f"selected node {index}: {nid} {layer.data[index]}")
+                # if performing an action, check if a task node is in current ROI
+                if self.task_node is None or self.task_node['nid'] not in self.TaskManager.G.nodes:
+                    napari.utils.notifications.show_info("Please select a task node first.")
+                    return
                 is_successed = False
+                self.task_node = self.TaskManager.task_node
                 self.action_node = self.TaskManager.set_action_node(nid)
+                # add path
                 if event.button == 1:
-                    # add path
-                    path_nodes, path_edges = self.trace_astar(
-                        src_node={'nid': self.task_node['nid'], 'coord': self.task_node['coord']},
-                        dst_node={'nid': self.action_node['nid'], 'coord': coord}
-                    )
-                    action = Action(self.RecWidgets.get_username(), self.task_node, 'add_path', 
-                                    action_node=self.action_node, action_edge=None,
-                                    path_nodes=path_nodes, path_edges=path_edges)
-                    is_successed = self.TaskManager.action_stack_push(action)
+                    is_successed = self.action_add_path(self.task_node, self.action_node, new_action_node=False)
+                    print(f'[Action] add path from task node ({self.task_node["nid"]}) to action node ({self.action_node["nid"]})')
+                # delete node
                 elif event.button == 2:
-                    # delete node
-                    action = Action(self.RecWidgets.get_username(), self.task_node, 'delete_nodes', 
-                                    action_node=self.action_node, action_edge=None)
-                    is_successed = self.TaskManager.action_stack_push(action)
+                    is_successed = self.action_delete_node(self.task_node, self.action_node)
+                    print(f'[Action] delete node: {self.action_node["nid"]}')
+
+                # refresh
                 if is_successed:
                     self.render(init_graph=False)
+                    print(f'render')
+
+        # if clicked on empty space
+        elif index is None:
+            is_successed = False
+            # if user wants to create a new path to a new node
+            if 'Shift' in event.modifiers and event.button == 2:
+                coord = self.get_click_position(self.image_layer, event)
+                self.task_node = self.TaskManager.task_node
+                action_node = {
+                    'nid': 0,
+                    'coord': coord,
+                }
+                is_successed = self.action_add_path(self.task_node, action_node, new_action_node=True)
+                print(f'[Action] add path from task node ({self.task_node["nid"]}) to new action node ({action_node["nid"]})')
+            if is_successed:
+                self.render(init_graph=False)
+                print(f'render')
     
     def edge_operation(self, layer: napari.layers.Vectors, event, threshold=2.0):
         if event.button == 2:
@@ -239,20 +322,19 @@ class NeuronReconstructor(SimpleViewer):
             min_idx = np.argmin(distance)
             min_distance = distance[min_idx]
             if min_distance < threshold:
-                src_nid = layer.properties['src'][min_idx]
-                dst_nid = layer.properties['dst'][min_idx]
+                src_nid = int(layer.properties['src'][min_idx])
+                dst_nid = int(layer.properties['dst'][min_idx])
                 if src_nid > dst_nid:
                     src_nid, dst_nid = dst_nid, src_nid
                 self.task_node = self.TaskManager.task_node
                 if self.task_node['nid'] not in (src_nid, dst_nid):
                     return
                 else:
-                    self.action_node = self.TaskManager.set_action_node([src_nid, dst_nid]-self.task_node['nid'])
+                    self.task_node = self.TaskManager.task_node
+                    self.action_node = self.TaskManager.set_action_node(src_nid if self.task_node['nid'] == dst_nid else dst_nid)
                     self.action_edge = self.TaskManager.set_action_edge(src_nid, dst_nid)
                     print(f'edge selected: {src_nid} -> {dst_nid}, distance to click: {min_distance}')
-                    action = Action(self.RecWidgets.get_username(), self.task_node, 'delete_edges', 
-                                    action_node=self.action_node, action_edge=self.action_edge)
-                    is_successed = self.TaskManager.action_stack_push(action)
+                    is_successed = self.action_delete_edge(self.task_node, self.action_node, self.action_edge)
                     if is_successed:
                         self.render(init_graph=False)
 

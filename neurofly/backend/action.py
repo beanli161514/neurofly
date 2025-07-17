@@ -7,7 +7,7 @@ class Action():
         self.action_node = action_node
         self.action_edge = action_edge
 
-        self.ACTION_TYPE_LIST = ['add_path', 'delete_nodes', 'delete_edges', 'update_node']
+        self.ACTION_TYPE_LIST = ['add_path', 'delete_node', 'delete_edge', 'update_node']
         if action_type in self.ACTION_TYPE_LIST:
             self.action_type = action_type
         else:
@@ -33,9 +33,4 @@ class Action():
     def record_history(self, history:dict):
         """Record the history of the action."""
         self.history = history
-    
-    def analyze_cid_trans(self):
-        if self.action_type == 'add_path':
-            task_node_cid = self.task_node['cid']
-            action_node_cid = self.action_node['cid']
             

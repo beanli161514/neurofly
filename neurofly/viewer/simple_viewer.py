@@ -1,5 +1,7 @@
-import napari.layers
+import os
 import numpy as np
+import tifffile as tiff
+from datetime import datetime
 
 from magicgui import widgets
 import napari
@@ -27,7 +29,7 @@ class SimpleViewer(widgets.Container):
         self.viewer.layers.clear()
         self.viewer.window.remove_dock_widget('all')
         self.image_layer = self.viewer.add_image(np.zeros((64, 64, 64), dtype=np.uint16), name='image')
-        self.goal_layer = self.viewer.add_points(ndim=3, symbol='ring', face_color='red', size=1, shading='spherical',name='goal')        
+        self.goal_layer = self.viewer.add_points(ndim=3, symbol='cross', face_color='red', size=3, shading='spherical',name='goal')        
 
         if type(self) is SimpleViewer:
             self.init_attributes()
@@ -52,8 +54,12 @@ class SimpleViewer(widgets.Container):
     def add_callback(self):
         """Add callbacks to the widgets and layers."""
         self.ImageFinder.reset_image_path_widget_callback(self.on_image_reading)
+        self.ImageFinder.reset_save_button_callback(self.on_save_clicked)
         self.ResChSelector.reset_button_callbacks(self.level_up, self.level_down, self.refresh)
         self.image_layer.mouse_double_click_callbacks.append(self.on_double_click)
+
+        # remove double_click_to_zoom function
+        self.viewer.mouse_double_click_callbacks.clear()
 
     def on_image_reading(self):
         """Callback for when the image path is changed."""
@@ -70,6 +76,15 @@ class SimpleViewer(widgets.Container):
         self.ResChSelector.reset_combobox_choices(resolution_choices, channels_choices)
         self.ResChSelector.reset_combobox_callbacks(self.on_resolution_change, self.on_channel_change)
         self.refresh()
+    
+    def on_save_clicked(self):
+        save_dir = self.ImageFinder.get_save_path()
+        save_name = datetime.now().strftime("%y%m%d%H%M%S")
+        save_path = os.path.join(save_dir, f"{save_name}.tif")
+        img = np.asarray(self.image_layer.data)
+        tiff.imwrite(save_path, img.astype(np.uint16))
+        print(f'Save current ROI image to ({save_path})')
+        napari.utils.notifications.show_info(f'Save current ROI image to ({save_path})')
     
     def on_resolution_change(self, event=None):
         """Callback for when the resolution is changed."""
@@ -177,11 +192,15 @@ class SimpleViewer(widgets.Container):
             self.ROISelector.set_center(max_point)
             self.refresh()
     
-    def update_info(self, info:str, append:bool=False):
-        """Update the information displayed in the ImageFinder widget."""
-        self.ImageFinder.update_info(info, append)
+    def get_image_info(self):
+        info = "\n".join(f"{key}: {value}" for key, value in self.IMAGE.info[self.resolution_level].items())
+        return info
 
-    def refresh(self):
+    def update_info(self, info:str):
+        """Update the information displayed in the ImageFinder widget."""
+        self.ImageFinder.update_info(info)
+
+    def refresh(self, info:str=None):
         """Refresh the image layer with the current ROI and resolution."""
         if self.IMAGE is None:
             return
@@ -202,7 +221,8 @@ class SimpleViewer(widgets.Container):
         self.viewer.layers.selection.active = self.image_layer
         self.image_layer.reset_contrast_limits()
         
-        info = "\n".join(f"{key}: {value}" for key, value in self.IMAGE.info[self.resolution_level].items())
+        if info is None:
+            info = self.get_image_info()
         self.update_info(info)
         
 

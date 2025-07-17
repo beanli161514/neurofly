@@ -8,13 +8,10 @@ class TaskManager():
         self.DB = NeurodbSQLite(db_path)
         self.G = NeuroGraph()
 
-        self.task_node = {}
-        self.action_node = {}
-        self.action_edge = {}
-
         self.action_stack:list[Action] = []
 
         self.init_task()
+        self.reset_task_status()
     
     def init_graph(self, roi):
         nodes_coords, edges_coords = self.DB.read_nodes_edges_within_roi(roi)
@@ -25,40 +22,64 @@ class TaskManager():
         self.MAX_SID, _ = self.DB.get_max_sid_version()
     
     def init_task(self):
-        self.tasks = self.DB.read_tasks() if self.DB else []
-        self.tasks_status = {}
-        for idx, task in enumerate(self.tasks):
-            self.tasks_status[task['nid']] = {
+        tasks = self.DB.read_tasks() if self.DB else []
+        self.TASKS = {
+            'tasks': {},
+            'checked_list': [],
+            'unchecked_list': [],
+            'last_idx': -1,
+            'next_idx': 0,
+            'last_submit': False,
+        }
+        for idx, task in enumerate(tasks):
+            self.TASKS['unchecked_list'].append(task['nid'])
+            self.TASKS['tasks'][task['nid']] = {
+                'idx': idx,
+                'nid': task['nid'],
                 'checked': -1,
-                'idx': idx
+                'coord': task['coord'],
+                'cnnt_len': task['cnnt_len']
             }
-        self.curr_idx = 0
     
-    def get_one_task(self, idx:int=None):
-        if idx is None:
-            idx = self.curr_idx
-        task = self.tasks[idx]
-        nid = task['nid']
-        coord = task['coord']
-        seg_len = task['cnnt_len']
-        checked = self.tasks_status[nid]['checked']
-
-        self.set_task_node(nid)
-        return nid, coord, seg_len, checked
+    def reset_task_status(self):
+        self.TASKS.update({
+            'last_submit': True,
+            'next_idx': 0,
+            'last_idx': -1,
+        })
+        self.task_node = None
+        self.action_node = None
+        self.action_edge = None
 
     def get_next_task(self):
-        checked = 1
-        while checked != -1:
-            if self.curr_idx >= len(self.tasks):
-                return None, None, None, None
-            nid, coord, seg_len, checked = self.get_one_task(self.curr_idx)
-            self.set_task_node(nid)
-            self.curr_idx += 1
-        return nid, coord, seg_len
-
+        if len(self.TASKS['unchecked_list']) == 0:
+            return None
+        else:
+            next_idx = self.TASKS['next_idx'] % len(self.TASKS['unchecked_list'])
+            task_nid = self.TASKS['unchecked_list'][next_idx]
+            task = self.TASKS['tasks'][task_nid]
+            self.set_task_node(task_nid)
+            self.TASKS['next_idx'] = next_idx + 1
+            return task
+    
+    def get_last_task(self):
+        if len(self.TASKS['checked_list']) == 0:
+            return None
+        else:
+            last_idx = self.TASKS['last_idx'] % len(self.TASKS['checked_list'])
+            task_nid = self.TASKS['checked_list'][last_idx]
+            task = self.TASKS['tasks'][task_nid]
+            self.set_task_node(task_nid)
+            self.TASKS['last_idx'] = last_idx-1
+            return task
+            
     def finish_one_task(self, nid:int):
-        self.tasks_status[nid]['checked'] = 1
-
+        if nid in self.TASKS['unchecked_list']:
+            idx = self.TASKS['unchecked_list'].index(nid)
+            self.TASKS['unchecked_list'].pop(idx)
+            self.TASKS['checked_list'].append(nid)
+            self.TASKS['tasks'][nid]['checked'] = 1
+        
     def set_task_node(self, nid:int):
         """Set the task node for the current task."""
         self.task_node = self.DB.read_one_node(nid)
@@ -75,50 +96,62 @@ class TaskManager():
         return self.action_edge
     
     def action_stack_push(self, action:Action):
-        if action.action_type == 'add_path':
-            is_successed = self.add_path(action)
-        elif action.action_type == 'delete_nodes':
-            # record history for the action
-            history = {
-                'nodes': {action.action_node['nid']: action.action_node},
-                'edges': self.DB.read_edges_by_nids([action.action_node['nid']])
-            }
-            action.record_history(history)
-            is_successed = self.delete_nodes(action, revoke=False)
-        elif action.action_type == 'delete_edges':
-            # record history for the action
-            src, dst = action.action_edge['src'], action.action_edge['dst']
-            history = {
-                'nodes': self.DB.read_nodes([src, dst]),
-                'edges': {(src, dst): action.action_edge}
-            }
-            action.record_history(history)
-            is_successed = self.delete_edges(action, revoke=False)
-        elif action.action_type == 'update_node':
-            history = {
-                'nodes': self.DB.read_nodes([action.task_node['nid']]),
-                'edges': {}
-            }
-            action.record_history(history)
-            self.action_stack.append(action)
+        try:
+            if action.action_type == 'add_path':
+                self.G.add_nodes(action.path_nodes)
+                self.G.add_edges(action.path_edges)
+            elif action.action_type == 'delete_node':
+                history = {
+                    'nodes': {action.action_node['nid']: action.action_node},
+                    'edges': self.DB.read_edges_by_nids([action.action_node['nid']])
+                }
+                # record history for the action
+                action.record_history(history)
+                self.G.delete_nodes({action.action_node['nid']: action.action_node})
+            elif action.action_type == 'delete_edge':
+                src, dst = action.action_edge['src'], action.action_edge['dst']
+                history = {
+                    'nodes': self.DB.read_nodes([src, dst]),
+                    'edges': {(src, dst): action.action_edge}
+                }
+                # record history for the action
+                action.record_history(history)
+                src_dst = (action.action_edge['src'], action.action_edge['dst'])
+                self.G.delete_edges({src_dst: action.action_edge})
+            elif action.action_type == 'update_node':
+                history = {
+                    'nodes': self.DB.read_nodes([action.task_node['nid']]),
+                    'edges': {}
+                }
+                action.record_history(history)
+            else:
+                raise ValueError(f"Unknown action: {action.action_type}")
             is_successed = True
-        else:
-            raise ValueError(f"Unknown action: {action.action_type}")
-        return is_successed
+            self.action_stack.append(action)
+        except Exception as E:
+            print(f'Error in action_stack_push: {E}')
+            is_successed = False
+        finally:
+            return is_successed
     
     def action_stack_pop(self):
         if len(self.action_stack) == 0:
             return None
-        action = self.action_stack.pop()
-        if action.action_type == 'add_path':
-            self.delete_nodes(action, revoke=True)
-            self.delete_edges(action, revoke=True)
-        elif action.action_type == 'delete_nodes':
-            self._add_nodes(action, revoke=True)
-        elif action.action_type == 'delete_edges':
-            self._add_edges(action, revoke=True)
-        else:
-            raise ValueError(f"Unknown action: {action.action_type}")
+        try:
+            action = self.action_stack.pop()
+            if action.action_type == 'add_path':
+                self.G.delete_nodes(action.path_nodes)
+                self.G.delete_edges(action.path_edges)
+            elif action.action_type == 'delete_node':
+                self.G.add_nodes(action.history['nodes'])
+                self.G.add_edges(action.history['edges'])
+            elif action.action_type == 'delete_edge':
+                self.G.add_edges(action.history['edges'])
+            else:
+                raise ValueError(f"Unknown action: {action.action_type}")
+        except Exception as E:
+            print(f'Error in action_stack_pop: {E}')
+            self.action_stack.append(action)
         return action
 
     def action_stack_clear(self):
@@ -134,8 +167,9 @@ class TaskManager():
                 max_nid = self.MAX_NID
 
                 # add new path nodes
-                for _nid, node_data in action.path_nodes.items():
-                    nid = max_nid + (- _nid)
+                _neg_nid_offset = min(action.path_nodes.keys())
+                for _neg_temp_nid, node_data in action.path_nodes.items():
+                    nid = max_nid + (- (_neg_temp_nid - _neg_nid_offset) + 1)
                     node_data.update({
                         'nid': nid,
                         'creator': action.creator,
@@ -147,9 +181,9 @@ class TaskManager():
                 self.DB.add_nodes(added_nodes)
 
                 # add new path edges
-                for (_src, _dst), edge_data in action.path_edges.items():
-                    src = max_nid + (- _src)
-                    dst = max_nid + (- _dst)
+                for (_neg_temp_src_nid, _neg_temp_dst_nid), edge_data in action.path_edges.items():
+                    src = max_nid + (- (_neg_temp_src_nid - _neg_nid_offset) + 1)
+                    dst = max_nid + (- (_neg_temp_dst_nid - _neg_nid_offset) + 1)
                     edge_data.update({
                         'creator': action.creator,
                     })
@@ -157,10 +191,11 @@ class TaskManager():
                 self.DB.add_edges(added_edges)
 
                 # check the action node
-                self.DB.update_nodes([action.action_node['nid']], creator=action.creator, checked=1)
-                self.finish_one_task(action.action_node['nid'])
+                if action.action_node['nid'] >0 :
+                    self.DB.update_nodes([action.action_node['nid']], creator=action.creator, checked=1)
+                    self.finish_one_task(action.action_node['nid'])
             
-            elif action.action_type == 'delete_nodes':
+            elif action.action_type == 'delete_node':
                 # the nodes to be deleted is the action node
                 # action node and its edges are also recorded in the action.history
                 deleted_nids = [action.action_node['nid']]
@@ -169,7 +204,7 @@ class TaskManager():
                 deleted_SrcDst = action.history['edges'].keys()
                 self.DB.delete_edges(deleted_SrcDst)
             
-            elif action.action_type == 'delete_edges':
+            elif action.action_type == 'delete_edge':
                 # the edges to be deleted is the action edge
                 deleted_SrcDst = [(action.action_edge['src'], action.action_edge['dst'])]
                 self.DB.delete_edges(deleted_SrcDst)
@@ -188,50 +223,6 @@ class TaskManager():
         self.actions_record2db()
         self.action_stack_clear()
         self.init_db_status()
-
-    def add_path(self, action:Action):
-        try:
-            self._add_nodes(action, revoke=False)
-            self._add_edges(action, revoke=False)
-            self.action_stack.append(action)
-        except Exception as e:
-            print(f"Error adding path: {e}")
-            return False
-        return True
-
-    def _add_nodes(self, action:Action, *, revoke:bool):
-        if revoke:
-            self.G.add_nodes(action.history['nodes'])
-            self.G.add_edges(action.history['edges'])
-        else:
-            self.G.add_nodes(action.path_nodes)
-
-    def _add_edges(self, action:Action, *, revoke:bool):
-        if revoke:
-            self.G.add_edges(action.history['edges'])
-        else:
-            self.G.add_edges(action.path_edges)
-
-    def delete_nodes(self, action:Action, *, revoke:bool):
-        try:
-            self.G.delete_nodes(action.path_nodes)
-            if not revoke:
-                self.action_stack.append(action)
-        except Exception as e:
-            print(f"Error deleting nodes: {e}")
-            return False
-        return True
-    
-    def delete_edges(self, action:Action, *, revoke:bool):
-        try:
-            self.G.delete_edges(action.path_edges)
-            if not revoke:
-                self.action_stack.append(action)
-        except Exception as e:
-            print(f"Error deleting edges: {e}")
-            return False
-        return True
-
-
-
-    
+        self.reset_task_status()
+        
+        

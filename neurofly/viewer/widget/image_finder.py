@@ -40,14 +40,19 @@ class ImageFinder(widgets.Container):
         self.image_path_widget.changed.disconnect()
         self.image_path_widget.changed.connect(on_change_callback)
     
-    def update_info(self, info:str, append:bool=False):
+    def reset_save_button_callback(self, on_click_callback):
+        """Reset the callback for the save button."""
+        self.save_button.clicked.disconnect()
+        self.save_button.clicked.connect(on_click_callback)
+    
+    def update_info(self, info:str):
         """Update the text edit with image information."""
-        if append:
-            current_text = self.image_info_textEdit.value
-            info = current_text + '\n' + info
-        else:
-           self.image_info_textEdit.value = info
+        self.image_info_textEdit.value = info
 
     def get_image_path(self):
         path = str(self.image_path_widget.value)
+        return path
+    
+    def get_save_path(self):
+        path = str(self.save_path_widget.value)
         return path

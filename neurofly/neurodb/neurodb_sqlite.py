@@ -1,10 +1,6 @@
-import collections.abc
-import os
-import collections
 import sqlite3
 import json
 from datetime import datetime
-from ..backend.action import Action
 
 class NeurodbSQLite:
     def __init__(self, db_path):
@@ -310,7 +306,7 @@ class NeurodbSQLite:
             date = datetime.now()
             entries = []
             for action in actions:
-                action: Action
+                action: object
                 entries.append({
                     'type': action.action_type,
                     'task_nid': action.task_node['nid'],

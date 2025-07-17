@@ -29,12 +29,12 @@ class RecWidgets(widgets.Container):
             tooltip='Select the path to the database'
         )
         self.username_widget = widgets.LineEdit(
-            label='Username',
+            label='User',
             tooltip='Enter username',
             value=''
         )
         self.node_type_comboBox = widgets.ComboBox(
-            label='Node Type',
+            label='NodeType',
             tooltip='Select the type of node to create',
             choices=[
                 "undefined",         # 0
@@ -70,8 +70,12 @@ class RecWidgets(widgets.Container):
             tooltip='Submit the current reconstruction',
             enabled=False
         )
+        self.last_task_button = widgets.PushButton(
+            text='Last Checked Task',
+            tooltip='Back to the last task in the workflow'
+        )
         self.next_task_button = widgets.PushButton(
-            text='Next Task',
+            text='Next Unchecked Task',
             tooltip='Proceed to the next task in the workflow'
         )
     
@@ -107,7 +111,10 @@ class RecWidgets(widgets.Container):
             label=False
         )
         self.task_row = widgets.Container(
-            widgets=[self.next_task_button],
+            widgets=[
+                self.last_task_button,
+                self.next_task_button
+            ],
             layout='horizontal',
             label=False
         )
@@ -135,6 +142,11 @@ class RecWidgets(widgets.Container):
         """Set the callback for the revoke button."""
         self.revoke_button.clicked.disconnect()
         self.revoke_button.clicked.connect(on_revoke_callback)
+    
+    def reset_last_task_button_callback(self, on_last_task_callback):
+        """Set the callback for the next task button."""
+        self.last_task_button.clicked.disconnect()
+        self.last_task_button.clicked.connect(on_last_task_callback)
     
     def reset_next_task_button_callback(self, on_next_task_callback):
         """Set the callback for the next task button."""
