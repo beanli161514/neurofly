@@ -7,11 +7,11 @@ class NeuroGraph():
         self.nodes = self.graph.nodes
         self.edges = self.graph.edges
 
-        self.temp_max_nid = 0
         self.init_graph(nodes, edges)
 
     def init_graph(self, nodes:dict, edges:dict):
         self.graph.clear()
+        self.temp_max_nid = 0
         if nodes is not None:
             self.add_nodes(nodes)
         if edges is not None:
@@ -45,7 +45,7 @@ class NeuroGraph():
             if self.graph.has_edge(src, dst):
                 self.graph.remove_edge(src, dst)
 
-    def get_connected_components(self, task_node:dict=None):
+    def get_render_data(self, task_node:dict=None):
         cc_nids = list(nx.connected_components(self.graph))
         nodes_nids = []
         nodes_coords = []

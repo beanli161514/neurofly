@@ -7,6 +7,7 @@ class TaskManager():
         self.db_path = db_path
         self.DB = NeurodbSQLite(db_path)
         self.G = NeuroGraph()
+        self.G_prof = NeuroGraph()
 
         self.action_stack:list[Action] = []
 
@@ -14,8 +15,13 @@ class TaskManager():
         self.reset_task_status()
     
     def init_graph(self, roi):
-        nodes_coords, edges_coords = self.DB.read_nodes_edges_within_roi(roi)
-        self.G.init_graph(nodes_coords, edges_coords)
+        nodes, edges = self.DB.read_nodes_edges_within_roi(roi)
+        self.G.init_graph(nodes, edges)
+    
+    def init_graph_prof(self):
+        if self.task_node is not None:
+            nodes, edges = self.DB.read_connected_components(self.task_node['nid'], with_edges=True)
+            self.G_prof.init_graph(nodes, edges)
 
     def init_db_status(self):
         self.MAX_NID = self.DB.get_max_nid()
@@ -120,7 +126,7 @@ class TaskManager():
                 self.G.delete_edges({src_dst: action.action_edge})
             elif action.action_type == 'update_node':
                 history = {
-                    'nodes': self.DB.read_nodes([action.task_node['nid']]),
+                    'nodes': {action.task_node['nid']: action.task_node},
                     'edges': {}
                 }
                 action.record_history(history)
@@ -142,6 +148,9 @@ class TaskManager():
             if action.action_type == 'add_path':
                 self.G.delete_nodes(action.path_nodes)
                 self.G.delete_edges(action.path_edges)
+                neg_temp_max_nid = self.G.get_neg_temp_max_nid()
+                neg_temp_max_nid -= len(action.path_nodes)
+                self.G.set_neg_temp_max_nid(neg_temp_max_nid)
             elif action.action_type == 'delete_node':
                 self.G.add_nodes(action.history['nodes'])
                 self.G.add_edges(action.history['edges'])
@@ -167,7 +176,7 @@ class TaskManager():
                 max_nid = self.MAX_NID
 
                 # add new path nodes
-                _neg_nid_offset = min(action.path_nodes.keys())
+                _neg_nid_offset = max(action.path_nodes.keys())
                 for _neg_temp_nid, node_data in action.path_nodes.items():
                     nid = max_nid + (- (_neg_temp_nid - _neg_nid_offset) + 1)
                     node_data.update({
@@ -211,9 +220,9 @@ class TaskManager():
             
             elif action.action_type == 'update_node':
                 # check the task node
-                task_node = action.task_node
-                self.DB.update_nodes([task_node['nid']], creator=task_node['creator'], type=task_node['type'], checked=1)
-                self.finish_one_task(task_node['nid'])
+                action_node = action.action_node
+                self.DB.update_nodes([action_node['nid']], creator=action_node['creator'], type=action_node['type'], checked=1)
+                self.finish_one_task(action_node['nid'])
 
     def actions_record2db(self):
         self.DB.add_actions(self.action_stack)

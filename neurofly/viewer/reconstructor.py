@@ -54,7 +54,7 @@ class NeuronReconstructor(SimpleViewer):
         self.RecWidgets.reset_next_task_button_callback(self.next_task)
         self.RecWidgets.reset_last_task_button_callback(self.last_task)
         self.RecWidgets.reset_submit_button_callback(self.submit)
-
+        self.RecWidgets.reset_proofreading_checkbox_callback(self.proofread)
 
         self.nodes_layer.click_get_value = self.nodes_layer.get_value
         self.nodes_layer.get_value = lambda position, view_direction=None, dims_displayed=None, world=False: None
@@ -81,22 +81,6 @@ class NeuronReconstructor(SimpleViewer):
         else:
             napari.utils.notifications.show_info("this image is too large, try a smaller one")
     
-    def revoke(self):
-        self.TaskManager.action_stack_pop()
-        self.render(init_graph=False)
-
-    def submit(self):
-        self.task_node = self.TaskManager.task_node
-        self.task_node.update({
-            'creator': self.RecWidgets.get_username(),
-            'type': self.RecWidgets.get_node_type_idx(),
-        })
-        action = Action(self.RecWidgets.get_username(), self.task_node, 'update_node')
-        self.TaskManager.action_stack_push(action)
-        self.TaskManager.submit()
-        self.next_task()
-        self.RecWidgets.on_check_button_clicked()
-    
     def get_task_info(self):
         task_nid = self.TaskManager.task_node['nid'] if self.TaskManager.task_node else None
         unchecked_length = len(self.TaskManager.TASKS['unchecked_list'])
@@ -112,22 +96,6 @@ class NeuronReconstructor(SimpleViewer):
         task_info = self.get_task_info()
         info = f"{image_info}\n--------\n{task_info}"
         return info
-
-    def next_task(self):
-        task = self.TaskManager.get_next_task()
-        if task is None:
-            napari.utils.notifications.show_info("No more tasks available.")
-            return
-        self.ROISelector.set_center(task['coord'])
-        self.refresh()
-    
-    def last_task(self):
-        task = self.TaskManager.get_last_task()
-        if task is None:
-            napari.utils.notifications.show_info("No last task available.")
-            return
-        self.ROISelector.set_center(task['coord'])
-        self.refresh()
     
     def refresh(self):
         # update graph
@@ -157,7 +125,11 @@ class NeuronReconstructor(SimpleViewer):
         
         # visual: update layers
         self.task_node = self.TaskManager.task_node if self.TaskManager.task_node else None
-        nodes_coords, nodes_properties, edges_coords, edges_properties = self.TaskManager.G.get_connected_components(self.task_node)
+        if self.RecWidgets.get_proofreading_mode():
+            self.TaskManager.init_graph_prof()
+            nodes_coords, nodes_properties, edges_coords, edges_properties = self.TaskManager.G_prof.get_render_data(self.task_node)
+        else:
+            nodes_coords, nodes_properties, edges_coords, edges_properties = self.TaskManager.G.get_render_data(self.task_node)
         self.nodes_layer.data = nodes_coords
         self.nodes_layer.properties = nodes_properties
         self.nodes_layer.size = nodes_properties['sizes']
@@ -169,6 +141,30 @@ class NeuronReconstructor(SimpleViewer):
 
         # control: update widgets
         self.RecWidgets.set_node_type_idx(self.task_node['type'] if self.task_node else 0)
+    
+    def proofread(self):
+        if self.TaskManager is None or self.task_node is None:
+            napari.utils.notifications.show_info("Please load a database and select a task node first.")
+            self.RecWidgets.set_proofreading_mode(False)
+            return
+        if self.RecWidgets.get_proofreading_mode():
+            self.render(init_graph=False)
+    
+    def next_task(self):
+        task = self.TaskManager.get_next_task()
+        if task is None:
+            napari.utils.notifications.show_info("No more tasks available.")
+            return
+        self.ROISelector.set_center(task['coord'])
+        self.refresh()
+    
+    def last_task(self):
+        task = self.TaskManager.get_last_task()
+        if task is None:
+            napari.utils.notifications.show_info("No last task available.")
+            return
+        self.ROISelector.set_center(task['coord'])
+        self.refresh()
         
     def trace_astar(self, src_node, dst_node, interval=3, *, new_dst_node:bool=True):
         # sample function to sample the path at a given interval
@@ -204,12 +200,12 @@ class NeuronReconstructor(SimpleViewer):
                 neg_temp_nids = []
                 neg_temp_max_nid = self.TaskManager.G.get_neg_temp_max_nid()
                 for i, coord in enumerate(sampled_path):
-                    _neg_temp_nid = -(neg_temp_max_nid + i + 1)
+                    neg_temp_max_nid += 1
+                    _neg_temp_nid = -(neg_temp_max_nid)
                     neg_temp_nids.append(_neg_temp_nid)
                     nodes[neg_temp_nids[-1]] = {
-                        'coord': coord+offset,
+                        'coord': (coord+offset).tolist(),
                     }
-                    neg_temp_max_nid += 1
                 self.TaskManager.G.set_neg_temp_max_nid(neg_temp_max_nid)
                 neg_temp_nids = [src_nid] + neg_temp_nids + [dst_nid]
                 for _src, _dst in zip(neg_temp_nids[:-1], neg_temp_nids[1:]):
@@ -245,7 +241,33 @@ class NeuronReconstructor(SimpleViewer):
         is_successed = self.TaskManager.action_stack_push(action)
         return is_successed
 
+    def global_viewer_status_check(self, *, check_task_node:bool, check_prof_mode:bool):
+        passed = True
+        username = self.RecWidgets.get_username()
+        info = ''
+        if username is None or username == '':
+            info += "Please set a username for the database.\n"
+            passed = False
+        if self.TaskManager is None:
+            info += "Please load a database first.\n"
+            passed = False
+        if check_task_node and (self.task_node is None or self.task_node['nid'] not in self.TaskManager.G.nodes):
+            info += "Please select a task node first.\n"
+            passed = False
+        if check_prof_mode and self.RecWidgets.get_proofreading_mode():
+            info = "Proofreading mode is enabled, please disable it to perform actions."
+        if not passed:
+            napari.utils.notifications.show_info(info)
+        return passed
+
     def node_operation(self, layer:napari.layers.Points, event):
+        if 'Shift' in event.modifiers:
+            global_check = self.global_viewer_status_check(check_task_node=False, check_prof_mode=False)
+        else:
+            global_check = self.global_viewer_status_check(check_task_node=True, check_prof_mode=True)
+        if not global_check:
+            return
+        
         index = layer.click_get_value(
             event.position,
             view_direction=event.view_direction,
@@ -265,9 +287,6 @@ class NeuronReconstructor(SimpleViewer):
                     print(f'refresh')
             else:
                 # if performing an action, check if a task node is in current ROI
-                if self.task_node is None or self.task_node['nid'] not in self.TaskManager.G.nodes:
-                    napari.utils.notifications.show_info("Please select a task node first.")
-                    return
                 is_successed = False
                 self.task_node = self.TaskManager.task_node
                 self.action_node = self.TaskManager.set_action_node(nid)
@@ -303,6 +322,9 @@ class NeuronReconstructor(SimpleViewer):
                 print(f'render')
     
     def edge_operation(self, layer: napari.layers.Vectors, event, threshold=2.0):
+        if not self.global_viewer_status_check(check_task_node=True, check_prof_mode=True):
+            return
+        
         if event.button == 2:
             # delete edge
             edges_data = self.edges_layer.data
@@ -337,6 +359,27 @@ class NeuronReconstructor(SimpleViewer):
                     is_successed = self.action_delete_edge(self.task_node, self.action_node, self.action_edge)
                     if is_successed:
                         self.render(init_graph=False)
+    
+    def revoke(self):
+        self.TaskManager.action_stack_pop()
+        self.render(init_graph=False)
+
+    def submit(self):
+        if not self.global_viewer_status_check(check_task_node=True):
+            return
+        self.task_node = self.TaskManager.task_node
+        action_node = self.task_node
+        action_node.update({
+            'creator': self.RecWidgets.get_username(),
+            'type': self.RecWidgets.get_node_type_idx(),
+        })
+        action = Action(self.RecWidgets.get_username(), self.task_node, 'update_node',
+                        action_node=action_node)
+        self.TaskManager.action_stack_push(action)
+        self.TaskManager.submit()
+        self.next_task()
+        self.RecWidgets.on_check_button_clicked()
+
 
 def main():
     """Main function to run the NeuroReconstructor."""

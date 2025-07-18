@@ -300,6 +300,9 @@ class NeurodbSQLite:
             raise E
     
     def add_actions(self, actions:list):
+        def __dictWithTupleKey2list__(_dict:dict):
+            _list = [[k,v] for k,v in _dict.items()]
+            return _list
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
@@ -316,9 +319,12 @@ class NeurodbSQLite:
                     'action_edge_src': action.action_edge['src'] if action.action_edge else None,
                     'action_edge_dst': action.action_edge['dst'] if action.action_edge else None,
                     'path_nodes': json.dumps(action.path_nodes) if action.path_nodes else None,
-                    'path_edges': json.dumps(action.path_edges) if action.path_edges else None,
+                    'path_edges': json.dumps(__dictWithTupleKey2list__(action.path_edges)) if action.path_edges else None,
                     'creator': action.creator,
-                    'history': json.dumps(action.history) if action.path_edges else None,
+                    'history': json.dumps(
+                            {'nodes':action.history['nodes'],
+                             'edges':__dictWithTupleKey2list__(action.history['edges'])}
+                        ) if action.history else None,
                     'date': date
                 })
             cursor.executemany(
@@ -481,9 +487,7 @@ class NeurodbSQLite:
             WITH RECURSIVE connected_nodes(nid) AS (
                 -- Base case: start with the given node
                 SELECT ? AS nid
-                
                 UNION
-                
                 -- Recursive case: find all directly connected nodes
                 SELECT CASE 
                     WHEN e.src = cn.nid THEN e.dst

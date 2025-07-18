@@ -12,7 +12,8 @@ class RecWidgets(widgets.Container):
                 self.config_row,
                 self.model_exec_row,
                 self.finish_row,
-                self.task_row
+                self.task_row,
+                self.proofreading_row
             ],
             layout='vertical',
             labels=True,
@@ -22,6 +23,7 @@ class RecWidgets(widgets.Container):
         self.model_exec_row.margins = [0,0,0,0]
         self.finish_row.margins = [0,0,0,0]
         self.task_row.margins = [0,0,0,0]
+        self.proofreading_row.margins = [0,0,0,0]
     
     def init_widgets(self):
         self.database_path_widget = widgets.FileEdit(
@@ -78,6 +80,10 @@ class RecWidgets(widgets.Container):
             text='Next Unchecked Task',
             tooltip='Proceed to the next task in the workflow'
         )
+        self.proofreading_checkbox = widgets.CheckBox(
+            label='Proofreading',
+            tooltip='Enable proofreading mode for the reconstruction'
+        )
     
     def init_container_row(self):
         self.finder_row = widgets.Container(
@@ -115,6 +121,11 @@ class RecWidgets(widgets.Container):
                 self.last_task_button,
                 self.next_task_button
             ],
+            layout='horizontal',
+            label=False
+        )
+        self.proofreading_row = widgets.Container(
+            widgets=[self.proofreading_checkbox],
             layout='horizontal',
             label=False
         )
@@ -158,6 +169,11 @@ class RecWidgets(widgets.Container):
         self.submit_button.clicked.disconnect()
         self.submit_button.clicked.connect(on_submit_callback)
 
+    def reset_proofreading_checkbox_callback(self, on_proofreading_callback):
+        """Set the callback for the proofreading checkbox."""
+        self.proofreading_checkbox.changed.disconnect()
+        self.proofreading_checkbox.changed.connect(on_proofreading_callback)
+
     def get_database_path(self):
         """Get the path to the database."""
         path = str(self.database_path_widget.value) if self.database_path_widget.value else ''
@@ -179,6 +195,14 @@ class RecWidgets(widgets.Container):
         node_type = self.node_type_comboBox.value
         idx = int(self.node_type_comboBox.choices.index(node_type))
         return idx
+    
+    def set_proofreading_mode(self, state:bool):
+        """Set the state of the proofreading checkbox."""
+        self.proofreading_checkbox.value = state
+
+    def get_proofreading_mode(self):
+        """Get the state of the proofreading checkbox."""
+        return self.proofreading_checkbox.value
     
     def on_check_button_clicked(self):
         if self.check_button.text == 'Check':

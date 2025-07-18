@@ -29,7 +29,7 @@ class SimpleViewer(widgets.Container):
         self.viewer.layers.clear()
         self.viewer.window.remove_dock_widget('all')
         self.image_layer = self.viewer.add_image(np.zeros((64, 64, 64), dtype=np.uint16), name='image')
-        self.goal_layer = self.viewer.add_points(ndim=3, symbol='cross', face_color='red', size=3, shading='spherical',name='goal')        
+        self.goal_layer = self.viewer.add_points(ndim=3, symbol='cross', face_color='red', size=2, shading='spherical',name='goal')        
 
         if type(self) is SimpleViewer:
             self.init_attributes()
@@ -218,6 +218,7 @@ class SimpleViewer(widgets.Container):
         self.viewer.reset_view()
         self.viewer.camera.angles = camera_angles
         self.viewer.camera.zoom = camera_zoom
+        self.viewer.camera.center = np.array(center)
         self.viewer.layers.selection.active = self.image_layer
         self.image_layer.reset_contrast_limits()
         
