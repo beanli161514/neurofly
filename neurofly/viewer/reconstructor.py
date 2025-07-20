@@ -6,22 +6,13 @@ import numpy as np
 
 from brightest_path_lib.algorithm import NBAStarSearch
 
-if __name__ == "__main__":
-    import sys, os
-    sys.path.insert(0, os.getcwd())
-    from neurofly.viewer.simple_viewer import SimpleViewer
-    from neurofly.viewer.widget.rec_interactor import RecWidgets
-    from neurofly.model import Deconver, default_dec_weight_path, PosPredictor, default_transformer_weight_path
-    from neurofly.backend.task_manager import TaskManager
-    from neurofly.backend.action import Action
-else:
-    from .simple_viewer import SimpleViewer
-    from .widget.rec_interactor import RecWidgets
-    from ..model import Deconver, default_dec_weight_path, PosPredictor, default_transformer_weight_path
-    from ..backend.task_manager import TaskManager
-    from ..backend.action import Action
+from neurofly.viewer.simple_viewer import SimpleViewer
+from neurofly.viewer.widget.rec_interactor import RecWidgets
+from neurofly.model import Deconver, default_dec_weight_path, PosPredictor, default_transformer_weight_path
+from neurofly.backend.task_manager import TaskManager
+from neurofly.backend.action import Action
 
-        
+
 class NeuronReconstructor(SimpleViewer):
     def __init__(self, napari_viewer:napari.Viewer):
         super().__init__(napari_viewer)
@@ -114,7 +105,7 @@ class NeuronReconstructor(SimpleViewer):
             self.edges_layer.data = np.empty((0, 2, 3))
             return
     
-        elif self.resolution_level != 0 and self.task_node is not None:
+        elif self.task_node is not None:
             self.TaskManager.reset_task_status()
         
         # logic: update graph in TaskManager
@@ -131,10 +122,13 @@ class NeuronReconstructor(SimpleViewer):
         else:
             nodes_coords, nodes_properties, edges_coords, edges_properties = self.TaskManager.G.get_render_data(self.task_node)
         self.nodes_layer.data = nodes_coords
-        self.nodes_layer.properties = nodes_properties
+        self.nodes_layer.properties = {
+            'nids': nodes_properties['nids'], 
+        }
         self.nodes_layer.size = nodes_properties['sizes']
-        self.nodes_layer.face_colormap = 'hsl'
-        self.nodes_layer.face_color = 'colors'
+        if len(nodes_properties['colors']) > 0:
+            self.nodes_layer.face_colormap = 'hsl'
+            self.nodes_layer.face_color = nodes_properties['colors']
 
         self.edges_layer.data = edges_coords
         self.edges_layer.properties = edges_properties
@@ -147,8 +141,7 @@ class NeuronReconstructor(SimpleViewer):
             napari.utils.notifications.show_info("Please load a database and select a task node first.")
             self.RecWidgets.set_proofreading_mode(False)
             return
-        if self.RecWidgets.get_proofreading_mode():
-            self.render(init_graph=False)
+        self.render(init_graph=False)
     
     def next_task(self):
         task = self.TaskManager.get_next_task()
@@ -365,7 +358,8 @@ class NeuronReconstructor(SimpleViewer):
         self.render(init_graph=False)
 
     def submit(self):
-        if not self.global_viewer_status_check(check_task_node=True):
+        if not self.global_viewer_status_check(check_task_node=True, check_prof_mode=True):
+            self.RecWidgets.set_check_button_status('Check')
             return
         self.task_node = self.TaskManager.task_node
         action_node = self.task_node
@@ -378,7 +372,8 @@ class NeuronReconstructor(SimpleViewer):
         self.TaskManager.action_stack_push(action)
         self.TaskManager.submit()
         self.next_task()
-        self.RecWidgets.on_check_button_clicked()
+        self.RecWidgets.set_check_button_status('Check')
+        self.RecWidgets.set_node_type_idx(0)
 
 
 def main():

@@ -661,7 +661,7 @@ class NeurodbSQLite:
             max_Sid += 1
             segs_entries[max_Sid] = {
                 'sid': max_Sid,
-                'points': sqlite3.Binary(str(seg['points']).encode()),
+                'points': seg['points'],
                 'version': max_version,
                 'date': date
             }
@@ -737,6 +737,4 @@ class NeurodbSQLite:
             })
         conn.close()
         return tasks
-    
-
     

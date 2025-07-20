@@ -10,25 +10,24 @@ class RecWidgets(widgets.Container):
             widgets=[
                 self.finder_row,
                 self.config_row,
-                self.model_exec_row,
+                self.view_trans_row,
                 self.finish_row,
                 self.task_row,
-                self.proofreading_row
             ],
             layout='vertical',
             labels=True,
         )
         self.finder_row.margins = [0,0,0,0]
         self.config_row.margins = [0,0,0,0]
-        self.model_exec_row.margins = [0,0,0,0]
+        self.view_trans_row.margins = [0,0,0,0]
         self.finish_row.margins = [0,0,0,0]
         self.task_row.margins = [0,0,0,0]
-        self.proofreading_row.margins = [0,0,0,0]
     
     def init_widgets(self):
         self.database_path_widget = widgets.FileEdit(
             label='Database Path',
-            tooltip='Select the path to the database'
+            tooltip='Select the path to the database',
+            filter='*.db'
         )
         self.username_widget = widgets.LineEdit(
             label='User',
@@ -99,10 +98,10 @@ class RecWidgets(widgets.Container):
             layout='horizontal',
             label=False
         )
-        self.model_exec_row = widgets.Container(
+        self.view_trans_row = widgets.Container(
             widgets=[
+                self.proofreading_checkbox,
                 self.deconv_button,
-                self.tracer_button,
             ],
             layout='horizontal',
             label=False
@@ -121,11 +120,6 @@ class RecWidgets(widgets.Container):
                 self.last_task_button,
                 self.next_task_button
             ],
-            layout='horizontal',
-            label=False
-        )
-        self.proofreading_row = widgets.Container(
-            widgets=[self.proofreading_checkbox],
             layout='horizontal',
             label=False
         )
@@ -204,14 +198,20 @@ class RecWidgets(widgets.Container):
         """Get the state of the proofreading checkbox."""
         return self.proofreading_checkbox.value
     
+    def set_check_button_status(self, text:str):
+        """Set the text of the check button."""
+        self.check_button.text = text
+        if text == 'Check':
+            self.submit_button.enabled = False
+        elif text == 'Uncheck':
+            self.submit_button.enabled = True
+
     def on_check_button_clicked(self):
         if self.check_button.text == 'Check':
-            self.submit_button.enabled = True
-            self.check_button.text = 'Uncheck'
+            self.set_check_button_status('Uncheck')
             return True
         elif self.check_button.text == 'Uncheck':
-            self.submit_button.enabled = False
-            self.check_button.text = 'Check'
+            self.set_check_button_status('Check')
             return False
         
         

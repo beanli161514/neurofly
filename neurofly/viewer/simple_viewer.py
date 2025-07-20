@@ -6,19 +6,11 @@ from datetime import datetime
 from magicgui import widgets
 import napari
 
-if __name__ == "__main__":
-    import sys,os
-    sys.path.insert(0, os.getcwd())
+from .widget.roi_selector import ROISelector
+from .widget.res_ch_selector import ResChSelector
+from .widget.image_finder import ImageFinder
+from ..neurodb.image_reader import ImageReader
 
-    from neurofly.viewer.widget.roi_selector import ROISelector
-    from neurofly.viewer.widget.res_ch_selector import ResChSelector
-    from neurofly.viewer.widget.image_finder import ImageFinder
-    from neurofly.neurodb.image_reader import ImageReader
-else:
-    from .widget.roi_selector import ROISelector
-    from .widget.res_ch_selector import ResChSelector
-    from .widget.image_finder import ImageFinder
-    from ..neurodb.image_reader import ImageReader
 
 class SimpleViewer(widgets.Container):
     def __init__(self, napari_viewer: napari.Viewer):
@@ -68,7 +60,7 @@ class SimpleViewer(widgets.Container):
 
         OFFSET, SIZE = self.IMAGE.rois[0][:3], self.IMAGE.rois[0][3:]
         CENTER = [OFFSET[i] + SIZE[i] // 2 for i in range(3)]
-        self.ROISelector.set_roi(CENTER, [128]*3)
+        self.ROISelector.set_roi(CENTER, [64]*3)
 
         resolution_choices = self.IMAGE.resolution_levels
         channels_choices = self.IMAGE.channels
