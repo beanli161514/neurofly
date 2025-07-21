@@ -109,8 +109,6 @@ class NeuronReconstructor(SimpleViewer):
         # then update image
         if self.TaskManager:
             self.TaskManager.action_stack_clear()
-            if self.TaskManager.task_node is not None:
-                self.ROISelector.set_center(self.TaskManager.task_node['coord'])
             super().refresh(self.get_info())
         else:
             super().refresh()
