@@ -10,7 +10,7 @@
             "request": "launch",
             "module": "neurofly.viewer.simple_viewer",
             "console": "integratedTerminal",
-            "justMyCode": false
+            "justMyCode": true
         },
         {
             "name": "Python Debugger: reconstructor",
@@ -18,7 +18,7 @@
             "request": "launch",
             "module": "neurofly.viewer.reconstructor",
             "console": "integratedTerminal",
-            "justMyCode": false
+            "justMyCode": true
         }
     ]
 }

@@ -8,7 +8,7 @@ class ROISelector(widgets.Container):
         max_size: int = 512,
         default_center: Tuple[int, int, int] = (64, 64, 64),
         default_size: Tuple[int, int, int] = (64, 64, 64),
-        power_step: int = 64,
+        power_step: int = 32,
         **kwargs
     ):
         self.max_size = max_size

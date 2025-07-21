@@ -35,7 +35,6 @@ class TaskManager():
             'unchecked_list': [],
             'last_idx': -1,
             'next_idx': 0,
-            'last_submit': False,
         }
         for idx, task in enumerate(tasks):
             self.TASKS['unchecked_list'].append(task['nid'])
@@ -49,7 +48,6 @@ class TaskManager():
     
     def reset_task_status(self):
         self.TASKS.update({
-            'last_submit': True,
             'next_idx': 0,
             'last_idx': -1,
         })
@@ -70,6 +68,7 @@ class TaskManager():
     
     def get_last_task(self):
         if len(self.TASKS['checked_list']) == 0:
+            self.TASKS['next_idx'] = 0
             return None
         else:
             last_idx = self.TASKS['last_idx'] % len(self.TASKS['checked_list'])
@@ -156,6 +155,8 @@ class TaskManager():
                 self.G.add_edges(action.history['edges'])
             elif action.action_type == 'delete_edge':
                 self.G.add_edges(action.history['edges'])
+            elif action.action_type == 'update_node':
+                pass
             else:
                 raise ValueError(f"Unknown action: {action.action_type}")
         except Exception as E:
@@ -176,7 +177,7 @@ class TaskManager():
                 max_nid = self.MAX_NID
 
                 # add new path nodes
-                _neg_nid_offset = max(action.path_nodes.keys())
+                _neg_nid_offset = max(action.path_nodes.keys()) if len(action.path_nodes) > 0 else 0
                 for _neg_temp_nid, node_data in action.path_nodes.items():
                     nid = max_nid + (- (_neg_temp_nid - _neg_nid_offset) + 1)
                     node_data.update({
@@ -190,9 +191,11 @@ class TaskManager():
                 self.DB.add_nodes(added_nodes)
 
                 # add new path edges
-                for (_neg_temp_src_nid, _neg_temp_dst_nid), edge_data in action.path_edges.items():
-                    src = max_nid + (- (_neg_temp_src_nid - _neg_nid_offset) + 1)
-                    dst = max_nid + (- (_neg_temp_dst_nid - _neg_nid_offset) + 1)
+                for (src, dst), edge_data in action.path_edges.items():
+                    if src < 0:
+                        src = max_nid + (- (src - _neg_nid_offset) + 1)
+                    if dst < 0:
+                        dst = max_nid + (- (dst - _neg_nid_offset) + 1)
                     edge_data.update({
                         'creator': action.creator,
                     })
@@ -219,7 +222,8 @@ class TaskManager():
                 self.DB.delete_edges(deleted_SrcDst)
             
             elif action.action_type == 'update_node':
-                # check the task node
+                # check the task node (== action_node)
+                action.action_node.update({'checked': 1})
                 action_node = action.action_node
                 self.DB.update_nodes([action_node['nid']], creator=action_node['creator'], type=action_node['type'], checked=1)
                 self.finish_one_task(action_node['nid'])

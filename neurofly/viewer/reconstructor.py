@@ -6,11 +6,11 @@ import numpy as np
 
 from brightest_path_lib.algorithm import NBAStarSearch
 
-from neurofly.viewer.simple_viewer import SimpleViewer
-from neurofly.viewer.widget.rec_interactor import RecWidgets
-from neurofly.model import Deconver, default_dec_weight_path, PosPredictor, default_transformer_weight_path
-from neurofly.backend.task_manager import TaskManager
-from neurofly.backend.action import Action
+from .simple_viewer import SimpleViewer
+from .widget.rec_interactor import RecWidgets
+from ..model import Deconver, default_dec_weight_path, PosPredictor, default_transformer_weight_path
+from ..backend.task_manager import TaskManager
+from ..backend.action import Action
 
 
 class NeuronReconstructor(SimpleViewer):
@@ -18,16 +18,19 @@ class NeuronReconstructor(SimpleViewer):
         super().__init__(napari_viewer)
         self.nodes_layer = self.viewer.add_points(ndim=3, size=1, shading='spherical', name='nodes')
         self.edges_layer = self.viewer.add_vectors(ndim=3, vector_style='line', edge_color='red', edge_width=0.3, name='edges')
+        self.viewer.layers.selection.active = self.image_layer
 
         self.init_attributes()
         self.init_model()
         self.add_callback()
+        self.add_shortcut()
     
     def init_attributes(self):
         """Initialize attributes for the NeuronReconstructor."""
         super().init_attributes()
 
         self.TaskManager = None
+        self.task_node = None
 
         self.RecWidgets = RecWidgets()
         self.extend([self.RecWidgets])
@@ -40,7 +43,7 @@ class NeuronReconstructor(SimpleViewer):
         """Add callbacks to the widgets and layers."""
         super().add_callback()
         self.RecWidgets.reset_database_path_widget_callback(self.on_db_loading)
-        self.RecWidgets.reset_deconv_button_callback(self.on_deconv_clicked)
+        self.RecWidgets.reset_deconv_button_callback(self.deconv)
         self.RecWidgets.reset_revoke_button_callback(self.revoke)
         self.RecWidgets.reset_next_task_button_callback(self.next_task)
         self.RecWidgets.reset_last_task_button_callback(self.last_task)
@@ -50,10 +53,22 @@ class NeuronReconstructor(SimpleViewer):
         self.nodes_layer.click_get_value = self.nodes_layer.get_value
         self.nodes_layer.get_value = lambda position, view_direction=None, dims_displayed=None, world=False: None
         self.nodes_layer.mouse_drag_callbacks.append(self.node_operation)
+        self.nodes_layer.mouse_double_click_callbacks.append(self.select_task_node)
 
         self.edges_layer.click_get_value = self.edges_layer.get_value
         self.edges_layer.get_value = lambda position, view_direction=None, dims_displayed=None, world=False: None
         self.edges_layer.mouse_drag_callbacks.append(self.edge_operation)
+    
+    def add_shortcut(self):
+        """Add keyboard shortcuts for the viewer."""
+        deconv_shortcut_fn = lambda _self, _evnet=None: self.deconv()
+        self.viewer.bind_key('d', deconv_shortcut_fn, overwrite=True)
+        check_shortcut_fn = lambda _self, _event=None: self.RecWidgets.on_check_button_clicked()
+        self.viewer.bind_key('c', check_shortcut_fn, overwrite=True)
+        revoke_shortcut_fn = lambda _self, _event=None: self.revoke()
+        self.viewer.bind_key('r', revoke_shortcut_fn, overwrite=True)
+        submit_shortcut_fn = lambda _self, _event=None: self.submit()
+        self.viewer.bind_key('s', submit_shortcut_fn, overwrite=True)
     
     def on_db_loading(self):
         db_path = self.RecWidgets.get_database_path()
@@ -64,7 +79,7 @@ class NeuronReconstructor(SimpleViewer):
         self.render(init_graph=True)
         super().refresh(self.get_info())
 
-    def on_deconv_clicked(self):
+    def deconv(self):
         size = list(self.image_layer.data.shape)
         if (np.array(size)<=np.array([192,]*3)).all():
             sr_img = self.Deconver.process_one(self.image_layer.data)
@@ -76,7 +91,7 @@ class NeuronReconstructor(SimpleViewer):
         task_nid = self.TaskManager.task_node['nid'] if self.TaskManager.task_node else None
         unchecked_length = len(self.TaskManager.TASKS['unchecked_list'])
         checked_length = len(self.TaskManager.TASKS['checked_list'])
-        info = f"Task Node ID: {task_nid}\n"
+        info = f"Task Node ID: {task_nid} (idx:{self.TaskManager.TASKS['next_idx']-1})\n"
         info += f"Unchecked Tasks: {unchecked_length}\n"
         info += f"Checked Tasks: {checked_length}\n"
         return info
@@ -94,6 +109,8 @@ class NeuronReconstructor(SimpleViewer):
         # then update image
         if self.TaskManager:
             self.TaskManager.action_stack_clear()
+            if self.TaskManager.task_node is not None:
+                self.ROISelector.set_center(self.TaskManager.task_node['coord'])
             super().refresh(self.get_info())
         else:
             super().refresh()
@@ -104,9 +121,6 @@ class NeuronReconstructor(SimpleViewer):
             self.nodes_layer.data = np.zeros((0, 3))
             self.edges_layer.data = np.empty((0, 2, 3))
             return
-    
-        elif self.task_node is not None:
-            self.TaskManager.reset_task_status()
         
         # logic: update graph in TaskManager
         if init_graph:
@@ -127,7 +141,6 @@ class NeuronReconstructor(SimpleViewer):
         }
         self.nodes_layer.size = nodes_properties['sizes']
         if len(nodes_properties['colors']) > 0:
-            self.nodes_layer.face_colormap = 'hsl'
             self.nodes_layer.face_color = nodes_properties['colors']
 
         self.edges_layer.data = edges_coords
@@ -246,18 +259,35 @@ class NeuronReconstructor(SimpleViewer):
             passed = False
         if check_task_node and (self.task_node is None or self.task_node['nid'] not in self.TaskManager.G.nodes):
             info += "Please select a task node first.\n"
+            self.TaskManager.reset_task_status()
             passed = False
         if check_prof_mode and self.RecWidgets.get_proofreading_mode():
             info = "Proofreading mode is enabled, please disable it to perform actions."
         if not passed:
             napari.utils.notifications.show_info(info)
         return passed
+    
+    def select_task_node(self, layer:napari.layers.Points, event):
+        global_check = self.global_viewer_status_check(check_task_node=False, check_prof_mode=False)
+        if not global_check:
+            return
+        index = layer.click_get_value(
+            event.position,
+            view_direction=event.view_direction,
+            dims_displayed=event.dims_displayed,
+            world=True,
+        )
+        if index is not None:
+            if event.button == 1:
+                nid = int(layer.properties['nids'][index])
+                is_successed = self.action_select_task_node(nid)
+            if is_successed:
+                print(f'[Action] select task node: {nid}')
+                self.refresh()
+                print(f'refresh')
 
     def node_operation(self, layer:napari.layers.Points, event):
-        if 'Shift' in event.modifiers:
-            global_check = self.global_viewer_status_check(check_task_node=False, check_prof_mode=False)
-        else:
-            global_check = self.global_viewer_status_check(check_task_node=True, check_prof_mode=True)
+        global_check = self.global_viewer_status_check(check_task_node=True, check_prof_mode=True)
         if not global_check:
             return
         
@@ -270,32 +300,23 @@ class NeuronReconstructor(SimpleViewer):
         # if clicked on a existing node
         if index is not None:
             nid = int(layer.properties['nids'][index])
-            if 'Shift' in event.modifiers:
-                # if Shift is pressed, select a task node
-                if event.button == 1:
-                    is_successed = self.action_select_task_node(nid)
-                    print(f'[Action] select task node: {nid}')
-                if is_successed:
-                    self.refresh()
-                    print(f'refresh')
-            else:
-                # if performing an action, check if a task node is in current ROI
-                is_successed = False
-                self.task_node = self.TaskManager.task_node
-                self.action_node = self.TaskManager.set_action_node(nid)
-                # add path
-                if event.button == 1:
-                    is_successed = self.action_add_path(self.task_node, self.action_node, new_action_node=False)
-                    print(f'[Action] add path from task node ({self.task_node["nid"]}) to action node ({self.action_node["nid"]})')
-                # delete node
-                elif event.button == 2:
-                    is_successed = self.action_delete_node(self.task_node, self.action_node)
-                    print(f'[Action] delete node: {self.action_node["nid"]}')
+            # if performing an action, check if a task node is in current ROI
+            is_successed = False
+            self.task_node = self.TaskManager.task_node
+            self.action_node = self.TaskManager.set_action_node(nid)
+            # add path
+            if 'Shift' in event.modifiers and event.button == 1:
+                is_successed = self.action_add_path(self.task_node, self.action_node, new_action_node=False)
+                print(f'[Action] add path from task node ({self.task_node["nid"]}) to action node ({self.action_node["nid"]})')
+            # delete node
+            elif event.button == 2:
+                is_successed = self.action_delete_node(self.task_node, self.action_node)
+                print(f'[Action] delete node: {self.action_node["nid"]}')
 
-                # refresh
-                if is_successed:
-                    self.render(init_graph=False)
-                    print(f'render')
+            # refresh
+            if is_successed:
+                self.render(init_graph=False)
+                print(f'render')
 
         # if clicked on empty space
         elif index is None:

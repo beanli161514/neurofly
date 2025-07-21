@@ -46,19 +46,21 @@ class NeuroGraph():
                 self.graph.remove_edge(src, dst)
 
     def get_render_data(self, task_node:dict=None):
-        def __gene_hsl_color__(n_group:int):
+        def __gene_group_color__(groups:list):
+            n_group = len(groups)
             if n_group == 1:
-                return np.array([[1,0,0]], dtype=float)  # 只有一组，纯红
+                group_colors = np.array([[1,0,0]], dtype=float)
             elif n_group == 2:
-                return np.array([[1,0,0],[0,0,1]], dtype=float)  # 两组红蓝
+                group_colors = np.array([[1,0,0],[0,0,1]], dtype=float)
             else:
                 idx = np.linspace(0, 1, n_group)
                 g = 1 - np.abs(2*idx - 1)
                 r = 1 - idx
                 b = idx
-                colors = np.stack([r, g, b], axis=1)
-                return colors
-        cc_nids = sorted(list(nx.connected_components(self.graph)))[::-1]
+                group_colors = np.stack([r, g, b], axis=1)
+            colors = np.repeat(group_colors, [len(g) for g in groups], axis=0)
+            return colors
+        cc_nids = sorted(nx.connected_components(self.graph), key=len, reverse=True)
         nodes_nids = []
         nodes_coords = []
         nodes_colors = []
@@ -68,16 +70,13 @@ class NeuroGraph():
         edges_dst_nids = []
         for index, _nids in enumerate(cc_nids):
             nodes_nids += _nids
-            # color = index
-            # nodes_colors += [color]*len(_nids)
-            # nodes_colors += [np.asarray([color,color,color,1])] * len(_nids)
             for _nid in _nids:
                 nodes_coords.append(self.graph.nodes[_nid]['coord'])
                 if task_node is not None and _nid == task_node['nid']:
                     nodes_sizes.append(2)
                 else:
                     nodes_sizes.append(1)
-        nodes_colors = __gene_hsl_color__(len(nodes_nids))
+        nodes_colors = __gene_group_color__(cc_nids)
 
         for src, dst in self.graph.edges:
             src_coord = np.asarray(self.graph.nodes[src]['coord'])
