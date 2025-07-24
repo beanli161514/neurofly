@@ -16,6 +16,7 @@ from ..backend.action import Action
 class NeuronReconstructor(SimpleViewer):
     def __init__(self, napari_viewer:napari.Viewer):
         super().__init__(napari_viewer)
+        self.viewer.__dict__['neurofly']['reconstructor'] = self
         self.nodes_layer = self.viewer.add_points(ndim=3, size=1, shading='spherical', name='nodes')
         self.edges_layer = self.viewer.add_vectors(ndim=3, vector_style='line', edge_color='red', edge_width=0.3, name='edges')
         self.viewer.layers.selection.active = self.image_layer

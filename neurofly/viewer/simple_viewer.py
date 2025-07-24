@@ -17,6 +17,8 @@ class SimpleViewer(widgets.Container):
         super().__init__()
         # viewer
         self.viewer = napari_viewer
+        self.viewer.__dict__['neurofly'] = {}
+        self.viewer.__dict__['neurofly']['simple_viewer'] = self
         self.viewer.dims.ndisplay = 3
         self.viewer.layers.clear()
         self.viewer.window.remove_dock_widget('all')
