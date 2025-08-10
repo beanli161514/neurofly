@@ -448,7 +448,7 @@ class NeurodbSQLite:
         rtree_exists = cursor.fetchone() is not None
         if rtree and rtree_exists:
             query = '''
-                SELECT n.nid, n.x, n.y, n.z
+                SELECT n.nid, n.x, n.y, n.z, n.type
                 FROM nodes n JOIN nodes_rtree r ON n.nid = r.id
                 WHERE r.minX >= ? AND r.minX <= ?
                 AND r.minY >= ? AND r.minY <= ?
@@ -466,7 +466,9 @@ class NeurodbSQLite:
         nodes = {}
         for row in cursor.fetchall():
             nodes[row['nid']] = {
+                'nid': row['nid'],
                 'coord': [row['x'], row['y'], row['z']],
+                'type': row['type'],
             }
 
         nids = list(nodes.keys())
@@ -479,16 +481,62 @@ class NeurodbSQLite:
         conn.close()
         return nodes, edges
     
-    def read_connected_components(self, nid:int, with_edges:bool=False):
+    def read_connected_components(self, nid: int, with_edges: bool = False):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        visited_nid = set()
+        bfs_queue = [nid]
+        nodes = {}
+        edges = {}
+
+        while bfs_queue:
+            current_nid = bfs_queue.pop(0)
+            if current_nid in visited_nid:
+                continue
+            visited_nid.add(current_nid)
+            cursor.execute("SELECT nid, x, y, z, type FROM nodes WHERE nid=?;", (current_nid,))
+            row = cursor.fetchone()
+            if row:
+                nodes[row['nid']] = {
+                    'nid': row['nid'],
+                    'coord': [row['x'], row['y'], row['z']],
+                    'type': row['type']
+                }
+            cursor.execute(
+                """
+                SELECT src, dst, creator, date
+                FROM edges
+                WHERE src=? OR dst=?;
+                """,(current_nid, current_nid)
+            )
+            for edge_row in cursor.fetchall():
+                src, dst = edge_row['src'], edge_row['dst']
+                edge_key = (src, dst)
+                if with_edges and edge_key not in edges:
+                    edges[edge_key] = {
+                        'creator': edge_row['creator'],
+                        'date': edge_row['date']
+                    }
+                neighbor = dst if src == current_nid else src
+                if neighbor not in visited_nid and neighbor not in bfs_queue:
+                    bfs_queue.append(neighbor)
+        conn.close()
+
+        if with_edges:
+            return nodes, edges
+        else:
+            return nodes
+
+    def read_unchecked_nodes_in_cc(self, nid:int):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         query = """
             WITH RECURSIVE connected_nodes(nid) AS (
-                -- Base case: start with the given node
                 SELECT ? AS nid
                 UNION
-                -- Recursive case: find all directly connected nodes
                 SELECT CASE 
                     WHEN e.src = cn.nid THEN e.dst
                     ELSE e.src
@@ -496,10 +544,10 @@ class NeurodbSQLite:
                 FROM connected_nodes cn
                 JOIN edges e ON (e.src = cn.nid OR e.dst = cn.nid)
             )
-            SELECT DISTINCT cn.nid, n.x, n.y, n.z
+            SELECT cn.nid, n.x, n.y, n.z
             FROM connected_nodes cn
             JOIN nodes n ON cn.nid = n.nid
-            ORDER BY cn.nid;
+            WHERE n.checked = -1;
         """
         cursor.execute(query, (nid,))
         nodes = {}
@@ -510,12 +558,7 @@ class NeurodbSQLite:
                 'coord': [row['x'], row['y'], row['z']],
             }
         conn.close()
-        if with_edges:
-            nids = list(nodes.keys())
-            edges = self.read_edges_by_nids(nids)
-            return nodes, edges
-        else:
-            return nodes
+        return nodes
     
     def delete_nodes(self, nids):
         # given a list of nid, delete nodes from nodes table and edges from edges table

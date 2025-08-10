@@ -8,7 +8,7 @@ from brightest_path_lib.algorithm import NBAStarSearch
 
 from .simple_viewer import SimpleViewer
 from .widget.rec_interactor import RecWidgets
-from ..model import Deconver, default_dec_weight_path, PosPredictor, default_transformer_weight_path
+from ..model import Deconver, default_dec_weight_path
 from ..backend.task_manager import TaskManager
 from ..backend.action import Action
 
@@ -18,7 +18,7 @@ class NeuronReconstructor(SimpleViewer):
         super().__init__(napari_viewer)
         self.viewer.__dict__['neurofly']['reconstructor'] = self
         self.nodes_layer = self.viewer.add_points(ndim=3, size=1, shading='spherical', name='nodes')
-        self.edges_layer = self.viewer.add_vectors(ndim=3, vector_style='line', edge_color='red', edge_width=0.3, name='edges')
+        self.edges_layer = self.viewer.add_vectors(ndim=3, vector_style='line', edge_color='orange', edge_width=0.3, name='edges')
         self.viewer.layers.selection.active = self.image_layer
 
         self.init_attributes()
@@ -38,7 +38,6 @@ class NeuronReconstructor(SimpleViewer):
 
     def init_model(self):
         self.Deconver = Deconver(default_dec_weight_path)
-        self.Tracer = PosPredictor(default_transformer_weight_path)
     
     def add_callback(self):
         """Add callbacks to the widgets and layers."""
@@ -53,12 +52,12 @@ class NeuronReconstructor(SimpleViewer):
 
         self.nodes_layer.click_get_value = self.nodes_layer.get_value
         self.nodes_layer.get_value = lambda position, view_direction=None, dims_displayed=None, world=False: None
-        self.nodes_layer.mouse_drag_callbacks.append(self.node_operation)
-        self.nodes_layer.mouse_double_click_callbacks.append(self.select_task_node)
+        self.nodes_layer.mouse_drag_callbacks.append(self.viewer_node_operation)
+        self.nodes_layer.mouse_double_click_callbacks.append(self.viewer_select_task_node)
 
         self.edges_layer.click_get_value = self.edges_layer.get_value
         self.edges_layer.get_value = lambda position, view_direction=None, dims_displayed=None, world=False: None
-        self.edges_layer.mouse_drag_callbacks.append(self.edge_operation)
+        self.edges_layer.mouse_drag_callbacks.append(self.viewer_edge_operation)
     
     def add_shortcut(self):
         """Add keyboard shortcuts for the viewer."""
@@ -76,9 +75,7 @@ class NeuronReconstructor(SimpleViewer):
         self.TaskManager = TaskManager(db_path)
         self.task_node = self.TaskManager.task_node
         self.action_node = self.TaskManager.action_node
-
-        self.render(init_graph=True)
-        super().refresh(self.get_info())
+        self.refresh()
 
     def deconv(self):
         size = list(self.image_layer.data.shape)
@@ -90,9 +87,12 @@ class NeuronReconstructor(SimpleViewer):
     
     def get_task_info(self):
         task_nid = self.TaskManager.task_node['nid'] if self.TaskManager.task_node else None
-        unchecked_length = len(self.TaskManager.TASKS['unchecked_list'])
-        checked_length = len(self.TaskManager.TASKS['checked_list'])
-        info = f"Task Node ID: {task_nid} (idx:{self.TaskManager.TASKS['next_idx']-1})\n"
+        status = self.TaskManager.get_task_status()
+        unchecked_length = status['unchecked_length']
+        checked_length = status['checked_length']
+        dynamic_length = status['dynamic_length']
+        info = f"Task Node ID: {task_nid}\n"
+        info += f"Dynamic Tasks: {dynamic_length}\n"
         info += f"Unchecked Tasks: {unchecked_length}\n"
         info += f"Checked Tasks: {checked_length}\n"
         return info
@@ -113,6 +113,7 @@ class NeuronReconstructor(SimpleViewer):
             super().refresh(self.get_info())
         else:
             super().refresh()
+        self.update_contrast()
     
     def render(self, *, init_graph:bool):
         # clear layers
@@ -148,6 +149,21 @@ class NeuronReconstructor(SimpleViewer):
         # control: update widgets
         self.RecWidgets.set_node_type_idx(self.task_node['type'] if self.task_node else 0)
     
+    def update_contrast(self):
+        nodes_coords = self.nodes_layer.data
+        if len(nodes_coords) > 0:
+            # nodes layer is not empty, calculate mean and std intensity
+            nodes_coords = nodes_coords - self.image_layer.translate
+            valid_idx = (np.all((nodes_coords >= 0) & (nodes_coords < self.image_layer.data.shape), axis=1))
+            nodes_coords = nodes_coords[valid_idx].astype(np.int16)
+            intensities:np.ndarray = self.image_layer.data[tuple(nodes_coords.T)]
+            mean_intensity = intensities.mean()
+            std_intensity = intensities.std()
+            self.image_layer.reset_contrast_limits()
+            self.image_layer.contrast_limits = [min(mean_intensity//2, 150), mean_intensity+std_intensity]
+        else:
+            super().update_contrast()
+
     def proofread(self):
         if self.TaskManager is None or self.task_node is None:
             napari.utils.notifications.show_info("Please load a database and select a task node first.")
@@ -156,19 +172,25 @@ class NeuronReconstructor(SimpleViewer):
         self.render(init_graph=False)
     
     def next_task(self):
-        task = self.TaskManager.get_next_task()
-        if task is None:
-            napari.utils.notifications.show_info("No more tasks available.")
+        task_node = self.TaskManager.get_next_task()
+        if task_node is None:
+            status = self.TaskManager.get_task_status()
+            if status['unchecked_length']>0:
+                napari.utils.notifications.show_info("Dynamic task stack is empty, click again to get the next task from global unchecked tasks.")
+                self.TaskManager.reset_task_status()
+                self.render(init_graph=True)
+            else:
+                napari.utils.notifications.show_info("No more tasks available.")
             return
-        self.ROISelector.set_center(task['coord'])
+        self.ROISelector.set_center(task_node['coord'])
         self.refresh()
     
     def last_task(self):
-        task = self.TaskManager.get_last_task()
-        if task is None:
+        task_node = self.TaskManager.get_last_task()
+        if task_node is None:
             napari.utils.notifications.show_info("No last task available.")
             return
-        self.ROISelector.set_center(task['coord'])
+        self.ROISelector.set_center(task_node['coord'])
         self.refresh()
         
     def trace_astar(self, src_node, dst_node, interval=3, *, new_dst_node:bool=True):
@@ -210,24 +232,32 @@ class NeuronReconstructor(SimpleViewer):
                     neg_temp_nids.append(_neg_temp_nid)
                     nodes[neg_temp_nids[-1]] = {
                         'coord': (coord+offset).tolist(),
+                        'checked': -1 if new_dst_node and i==len(sampled_path)-1 else 0,
                     }
                 self.TaskManager.G.set_neg_temp_max_nid(neg_temp_max_nid)
-                neg_temp_nids = [src_nid] + neg_temp_nids + [dst_nid]
+                if new_dst_node:
+                    neg_temp_nids = [src_nid] + neg_temp_nids
+                else:
+                    neg_temp_nids = [src_nid] + neg_temp_nids + [dst_nid]
                 for _src, _dst in zip(neg_temp_nids[:-1], neg_temp_nids[1:]):
                     edges[(_src, _dst)] = {}
         return nodes, edges
     
     def action_select_task_node(self, nid:int):
+        self.TaskManager.reset_task_status()
         self.task_node = self.TaskManager.set_task_node(nid)
         self.ROISelector.set_center(self.task_node['coord'])
         return True
 
-    def action_add_path(self, task_node:dict, action_node:dict, new_action_node:bool):
-        path_nodes, path_edges = self.trace_astar(
-            src_node={'nid': task_node['nid'], 'coord': task_node['coord']},
-            dst_node={'nid': action_node['nid'], 'coord': action_node['coord']},
-            new_dst_node=new_action_node
-        )
+    def action_add_path(self, task_node:dict, action_node:dict, new_action_node:bool, use_astar:bool):
+        if use_astar:
+            path_nodes, path_edges = self.trace_astar(
+                src_node={'nid': task_node['nid'], 'coord': task_node['coord']},
+                dst_node={'nid': action_node['nid'], 'coord': action_node['coord']},
+                new_dst_node=new_action_node
+            )
+        else:
+            path_nodes, path_edges = {}, {(task_node['nid'], action_node['nid']): {}}
         action = Action(self.RecWidgets.get_username(), task_node, 'add_path', 
                         action_node=action_node, action_edge=None,
                         path_nodes=path_nodes, path_edges=path_edges)
@@ -266,7 +296,7 @@ class NeuronReconstructor(SimpleViewer):
             napari.utils.notifications.show_info(info)
         return passed
     
-    def select_task_node(self, layer:napari.layers.Points, event):
+    def viewer_select_task_node(self, layer:napari.layers.Points, event):
         global_check = self.global_viewer_status_check(check_task_node=False, check_prof_mode=False)
         if not global_check:
             return
@@ -285,11 +315,10 @@ class NeuronReconstructor(SimpleViewer):
                 self.refresh()
                 print(f'refresh')
 
-    def node_operation(self, layer:napari.layers.Points, event):
+    def viewer_node_operation(self, layer:napari.layers.Points, event):
         global_check = self.global_viewer_status_check(check_task_node=True, check_prof_mode=True)
         if not global_check:
             return
-        
         index = layer.click_get_value(
             event.position,
             view_direction=event.view_direction,
@@ -305,8 +334,12 @@ class NeuronReconstructor(SimpleViewer):
             self.action_node = self.TaskManager.set_action_node(nid)
             # add path
             if 'Shift' in event.modifiers and event.button == 1:
-                is_successed = self.action_add_path(self.task_node, self.action_node, new_action_node=False)
+                is_successed = self.action_add_path(self.task_node, self.action_node, new_action_node=False, use_astar=True)
                 print(f'[Action] add path from task node ({self.task_node["nid"]}) to action node ({self.action_node["nid"]})')
+            # add path without a_star
+            if 'Control' in event.modifiers and event.button == 1:
+                is_successed = self.action_add_path(self.task_node, self.action_node, new_action_node=False, use_astar=False)
+                print(f'[Action] add path from task node ({self.task_node["nid"]}) to action node ({self.action_node["nid"]}) directly')
             # delete node
             elif event.button == 2:
                 is_successed = self.action_delete_node(self.task_node, self.action_node)
@@ -328,16 +361,15 @@ class NeuronReconstructor(SimpleViewer):
                     'nid': 0,
                     'coord': coord,
                 }
-                is_successed = self.action_add_path(self.task_node, action_node, new_action_node=True)
+                is_successed = self.action_add_path(self.task_node, action_node, new_action_node=True, use_astar=True)
                 print(f'[Action] add path from task node ({self.task_node["nid"]}) to new action node ({action_node["nid"]})')
             if is_successed:
                 self.render(init_graph=False)
                 print(f'render')
     
-    def edge_operation(self, layer: napari.layers.Vectors, event, threshold=2.0):
+    def viewer_edge_operation(self, layer: napari.layers.Vectors, event, threshold=2.0):
         if not self.global_viewer_status_check(check_task_node=True, check_prof_mode=True):
             return
-        
         if event.button == 2:
             # delete edge
             edges_data = self.edges_layer.data

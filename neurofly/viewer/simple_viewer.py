@@ -183,7 +183,7 @@ class SimpleViewer(widgets.Container):
         """Callback for double-click events on the image layer."""
         if event.button==1:
             max_point = self.get_click_position(layer, event)
-            print('Put point at: ', max_point)
+            print(f'move ROI center to {max_point}')
             self.ROISelector.set_center(max_point)
             self.refresh()
     
@@ -214,12 +214,24 @@ class SimpleViewer(widgets.Container):
         self.viewer.camera.angles = camera_angles
         self.viewer.camera.zoom = camera_zoom
         self.viewer.camera.center = np.array(center)
-        # self.viewer.layers.selection.active = self.image_layer
-        self.image_layer.reset_contrast_limits()
+        if type(self) is SimpleViewer:
+            self.update_contrast()
         
         if info is None:
             info = self.get_image_info()
         self.update_info(info)
+    
+    def update_contrast(self):
+        img:np.ndarray = self.image_layer.data
+        max_intensity = img.max()
+        min_intensity = img.min()
+        mean_intensity = img.mean()
+        std_intensity = img.std()
+        self.image_layer.reset_contrast_limits()
+        contrast_min = min(mean_intensity//2, min_intensity)
+        scale = np.log2(max_intensity//mean_intensity)
+        contrast_max = int((mean_intensity+2*std_intensity) * scale)
+        self.image_layer.contrast_limits = [contrast_min, contrast_max]
         
 
 def main():

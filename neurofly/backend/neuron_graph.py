@@ -21,12 +21,11 @@ class NeuroGraph():
         return self.temp_max_nid
 
     def set_neg_temp_max_nid(self, nid:int):
-        if nid > self.temp_max_nid:
-            self.temp_max_nid = nid
+        self.temp_max_nid = nid
 
     def add_nodes(self, nodes:dict):
         for nid, data in nodes.items():
-            self.graph.add_node(nid, coord=data['coord'])
+            self.graph.add_node(nid, coord=data['coord'], type=data.get('type', 0))
     
     def add_edges(self, edges:dict):
         for (src, dst), data in edges.items():
@@ -72,7 +71,9 @@ class NeuroGraph():
             nodes_nids += _nids
             for _nid in _nids:
                 nodes_coords.append(self.graph.nodes[_nid]['coord'])
-                if task_node is not None and _nid == task_node['nid']:
+                if self.graph.nodes[_nid]['type'] == 1:
+                    nodes_sizes.append(3)
+                elif task_node is not None and _nid == task_node['nid']:
                     nodes_sizes.append(2)
                 else:
                     nodes_sizes.append(1)

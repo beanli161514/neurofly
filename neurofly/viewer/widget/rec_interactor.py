@@ -182,7 +182,7 @@ class RecWidgets(widgets.Container):
         """Set the index of the node type."""
         if idx is None or idx < 0 or idx >= len(self.node_type_comboBox.choices):
             idx = 0
-        self.node_type_comboBox.set_choice(self.node_type_comboBox.choices[idx])
+        self.node_type_comboBox.value = self.node_type_comboBox.choices[idx]
 
     def get_node_type_idx(self):
         """Get the index of the selected node type."""

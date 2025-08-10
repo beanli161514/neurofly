@@ -5,7 +5,8 @@ class ImageFinder(widgets.Container):
         self.image_path_widget = widgets.FileEdit(
             label='Image Path',
             tooltip='Load an image file to display in the viewer',
-            # filter='*.tif;*.tiff;*.ims;',
+            # only accept tif, tiff, ims
+            filter='*.tif *.tiff *.ims',
         )
         self.save_path_widget = widgets.FileEdit(
             label='Save Path',

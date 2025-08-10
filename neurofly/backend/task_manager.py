@@ -1,5 +1,6 @@
 from .action import Action
 from .neuron_graph import NeuroGraph
+from .tasks import Tasks
 from ..neurodb.neurodb_sqlite import NeurodbSQLite
 
 class TaskManager():
@@ -29,65 +30,47 @@ class TaskManager():
     
     def init_task(self):
         tasks = self.DB.read_tasks() if self.DB else []
-        self.TASKS = {
-            'tasks': {},
-            'checked_list': [],
-            'unchecked_list': [],
-            'last_idx': -1,
-            'next_idx': 0,
-        }
-        for idx, task in enumerate(tasks):
-            self.TASKS['unchecked_list'].append(task['nid'])
-            self.TASKS['tasks'][task['nid']] = {
-                'idx': idx,
-                'nid': task['nid'],
-                'checked': -1,
-                'coord': task['coord'],
-                'cnnt_len': task['cnnt_len']
-            }
+        self.TASKS = Tasks(tasks)
     
     def reset_task_status(self):
-        self.TASKS.update({
-            'next_idx': 0,
-            'last_idx': -1,
-        })
+        self.TASKS.reset_idx()
         self.task_node = None
         self.action_node = None
         self.action_edge = None
 
+    def get_task_status(self):
+        return self.TASKS.get_status()
+
     def get_next_task(self):
-        if len(self.TASKS['unchecked_list']) == 0:
-            return None
+        task_nid_dynamic = self.TASKS.get_task_from_dynamicStack()
+        if task_nid_dynamic is not None:
+            task_node = self.set_task_node(task_nid_dynamic)
         else:
-            next_idx = self.TASKS['next_idx'] % len(self.TASKS['unchecked_list'])
-            task_nid = self.TASKS['unchecked_list'][next_idx]
-            task = self.TASKS['tasks'][task_nid]
-            self.set_task_node(task_nid)
-            self.TASKS['next_idx'] = next_idx + 1
-            return task
+            task_node = None
+            task_nid_unchecked = self.TASKS.get_task_from_unchecked()
+            if task_nid_unchecked is not None:
+                self.TASKS.add_task_in_dynamicStack({task_nid_unchecked: self.TASKS.TASKS[task_nid_unchecked]})
+        return task_node
     
     def get_last_task(self):
-        if len(self.TASKS['checked_list']) == 0:
-            self.TASKS['next_idx'] = 0
-            return None
+        task_nid = self.TASKS.get_task_from_checked()
+        if task_nid is not None:
+            task_node = self.set_task_node(task_nid, init_dynamic_stack=False)
         else:
-            last_idx = self.TASKS['last_idx'] % len(self.TASKS['checked_list'])
-            task_nid = self.TASKS['checked_list'][last_idx]
-            task = self.TASKS['tasks'][task_nid]
-            self.set_task_node(task_nid)
-            self.TASKS['last_idx'] = last_idx-1
-            return task
+            task_node = None
+        return task_node
             
-    def finish_one_task(self, nid:int):
-        if nid in self.TASKS['unchecked_list']:
-            idx = self.TASKS['unchecked_list'].index(nid)
-            self.TASKS['unchecked_list'].pop(idx)
-            self.TASKS['checked_list'].append(nid)
-            self.TASKS['tasks'][nid]['checked'] = 1
+    def finish_task(self, nid:int):
+        self.TASKS.finish_task(nid)
         
-    def set_task_node(self, nid:int):
+    def set_task_node(self, nid:int, *, init_dynamic_stack:bool=True):
         """Set the task node for the current task."""
-        self.task_node = self.DB.read_one_node(nid)
+        if nid is None:
+            self.task_node = None
+        else:
+            self.task_node = self.DB.read_one_node(nid)
+            if init_dynamic_stack and nid not in self.TASKS.DynamicStack:
+                self.TASKS.init_dynamic_stack(nid)
         return self.task_node
 
     def set_action_node(self, nid:int):
@@ -166,9 +149,19 @@ class TaskManager():
 
     def action_stack_clear(self):
         self.action_stack.clear()
+
+    def update_taskTree_from_action(self, action:Action=None):
+        action_nid = action.action_node['nid']
+        if action.action_type == 'add_path' and action_nid > 0:
+            cc_unchecked_nodes = self.DB.read_unchecked_nodes_in_cc(action_nid)
+            if action_nid in cc_unchecked_nodes:
+                # let action_nid be the first node in the unchecked nodes
+                action_unchecked_node = cc_unchecked_nodes.pop(action_nid)
+                cc_unchecked_nodes[action_nid] = action_unchecked_node
+            self.TASKS.add_task_in_dynamicStack(cc_unchecked_nodes)
     
     def actions_apply2db(self):
-        for action in self.action_stack:
+        for a_idx, action in enumerate(self.action_stack):
             # update db status
             self.init_db_status()
             if action.action_type == 'add_path':
@@ -184,11 +177,14 @@ class TaskManager():
                         'nid': nid,
                         'creator': action.creator,
                         'type': 0,
-                        'checked': 0,
+                        'checked': node_data.get('checked', 0),
                         'sid': -1,
                     })
+                    if node_data['checked'] == -1:
+                        self.action_stack[a_idx].action_node['nid'] = nid
                     added_nodes[nid] = node_data
                 self.DB.add_nodes(added_nodes)
+                self.update_taskTree_from_action(action)
 
                 # add new path edges
                 for (src, dst), edge_data in action.path_edges.items():
@@ -201,11 +197,6 @@ class TaskManager():
                     })
                     added_edges[(src, dst)] = edge_data
                 self.DB.add_edges(added_edges)
-
-                # check the action node
-                if action.action_node['nid'] >0 :
-                    self.DB.update_nodes([action.action_node['nid']], creator=action.creator, checked=1)
-                    self.finish_one_task(action.action_node['nid'])
             
             elif action.action_type == 'delete_node':
                 # the nodes to be deleted is the action node
@@ -226,7 +217,7 @@ class TaskManager():
                 action.action_node.update({'checked': 1})
                 action_node = action.action_node
                 self.DB.update_nodes([action_node['nid']], creator=action_node['creator'], type=action_node['type'], checked=1)
-                self.finish_one_task(action_node['nid'])
+                self.finish_task(action_node['nid'])
 
     def actions_record2db(self):
         self.DB.add_actions(self.action_stack)

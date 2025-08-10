@@ -106,6 +106,8 @@ class ROISelector(widgets.Container):
                 with widget.changed.blocked():
                     widget.value = clipped_value
             return clipped_value
+        else:
+            return new_value
 
     def _on_power_mode_changed(self, enabled):
         """Enable or disable power of two mode."""
