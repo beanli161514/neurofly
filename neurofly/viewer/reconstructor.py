@@ -61,6 +61,10 @@ class NeuronReconstructor(SimpleViewer):
     
     def add_shortcut(self):
         """Add keyboard shortcuts for the viewer."""
+        # remove key bind for 's' in nodes_layer
+        self.nodes_layer.bind_key('s', lambda _self, _event=None: None, overwrite=True)
+        self.nodes_layer.bind_key('z', lambda _self, _event=None: None, overwrite=True)
+        
         deconv_shortcut_fn = lambda _self, _evnet=None: self.deconv()
         self.viewer.bind_key('d', deconv_shortcut_fn, overwrite=True)
         check_shortcut_fn = lambda _self, _event=None: self.RecWidgets.on_check_button_clicked()
@@ -160,7 +164,7 @@ class NeuronReconstructor(SimpleViewer):
             mean_intensity = intensities.mean()
             std_intensity = intensities.std()
             self.image_layer.reset_contrast_limits()
-            self.image_layer.contrast_limits = [min(mean_intensity//2, 150), mean_intensity+std_intensity]
+            self.image_layer.contrast_limits = [int(min(mean_intensity//2, 150)), int(mean_intensity+std_intensity)]
         else:
             super().update_contrast()
 
@@ -211,7 +215,10 @@ class NeuronReconstructor(SimpleViewer):
         distance = np.linalg.norm(src_coord - dst_coord)
         # if distance is small, just connect the nodes directly
         if distance <= 5:
-            edges[(src_nid, dst_nid)] = {}
+            if new_dst_node:
+                edges[(-1, src_nid)] = {}
+            else:
+                edges[(src_nid, dst_nid)] = {}
         # if distance is large, use A* algorithm to find the path
         else:
             size = round(distance) + 8
@@ -232,7 +239,7 @@ class NeuronReconstructor(SimpleViewer):
                     neg_temp_nids.append(_neg_temp_nid)
                     nodes[neg_temp_nids[-1]] = {
                         'coord': (coord+offset).tolist(),
-                        'checked': -1 if new_dst_node and i==len(sampled_path)-1 else 0,
+                        'checked': -1 if new_dst_node and i==len(sampled_path)-1 else 0, # mark new dst node as unchecked
                     }
                 self.TaskManager.G.set_neg_temp_max_nid(neg_temp_max_nid)
                 if new_dst_node:
@@ -257,7 +264,15 @@ class NeuronReconstructor(SimpleViewer):
                 new_dst_node=new_action_node
             )
         else:
-            path_nodes, path_edges = {}, {(task_node['nid'], action_node['nid']): {}}
+            if new_action_node:
+                neg_temp_max_nid = self.TaskManager.G.get_neg_temp_max_nid()
+                neg_temp_max_nid += 1
+                _neg_temp_nid = -(neg_temp_max_nid)
+                path_nodes = {_neg_temp_nid: {'coord': action_node['coord'], 'checked': -1}}
+                path_edges = {(_neg_temp_nid, task_node['nid']): {}}
+                self.TaskManager.G.set_neg_temp_max_nid(neg_temp_max_nid)
+            else:
+                path_nodes, path_edges = {}, {(task_node['nid'], action_node['nid']): {}}
         action = Action(self.RecWidgets.get_username(), task_node, 'add_path', 
                         action_node=action_node, action_edge=None,
                         path_nodes=path_nodes, path_edges=path_edges)
@@ -331,17 +346,19 @@ class NeuronReconstructor(SimpleViewer):
             # if performing an action, check if a task node is in current ROI
             is_successed = False
             self.task_node = self.TaskManager.task_node
-            self.action_node = self.TaskManager.set_action_node(nid)
-            # add path
-            if 'Shift' in event.modifiers and event.button == 1:
-                is_successed = self.action_add_path(self.task_node, self.action_node, new_action_node=False, use_astar=True)
-                print(f'[Action] add path from task node ({self.task_node["nid"]}) to action node ({self.action_node["nid"]})')
-            # add path without a_star
+            # add path directly
             if 'Control' in event.modifiers and event.button == 1:
+                self.action_node = self.TaskManager.set_action_node(nid)
                 is_successed = self.action_add_path(self.task_node, self.action_node, new_action_node=False, use_astar=False)
                 print(f'[Action] add path from task node ({self.task_node["nid"]}) to action node ({self.action_node["nid"]}) directly')
+            # add path via a_star
+            elif 'Control' in event.modifiers and event.button == 2:
+                self.action_node = self.TaskManager.set_action_node(nid)
+                is_successed = self.action_add_path(self.task_node, self.action_node, new_action_node=False, use_astar=True)
+                print(f'[Action] add path from task node ({self.task_node["nid"]}) to action node ({self.action_node["nid"]})')
             # delete node
-            elif event.button == 2:
+            elif len(event.modifiers)==0 and event.button == 2:
+                self.action_node = self.TaskManager.set_action_node(nid)
                 is_successed = self.action_delete_node(self.task_node, self.action_node)
                 print(f'[Action] delete node: {self.action_node["nid"]}')
 
@@ -354,13 +371,18 @@ class NeuronReconstructor(SimpleViewer):
         elif index is None:
             is_successed = False
             # if user wants to create a new path to a new node
-            if 'Shift' in event.modifiers and event.button == 2:
+            # add path directly
+            if 'Shift' in event.modifiers and event.button == 1:
                 coord = self.get_click_position(self.image_layer, event)
                 self.task_node = self.TaskManager.task_node
-                action_node = {
-                    'nid': 0,
-                    'coord': coord,
-                }
+                action_node = {'nid': 0, 'coord': coord}
+                is_successed = self.action_add_path(self.task_node, action_node, new_action_node=True, use_astar=False)
+                print(f'[Action] add path from task node ({self.task_node["nid"]}) to new action node ({action_node["nid"]}) directly')
+            # add path via a_star
+            elif 'Shift' in event.modifiers and event.button == 2:
+                coord = self.get_click_position(self.image_layer, event)
+                self.task_node = self.TaskManager.task_node
+                action_node = {'nid': 0, 'coord': coord}
                 is_successed = self.action_add_path(self.task_node, action_node, new_action_node=True, use_astar=True)
                 print(f'[Action] add path from task node ({self.task_node["nid"]}) to new action node ({action_node["nid"]})')
             if is_successed:

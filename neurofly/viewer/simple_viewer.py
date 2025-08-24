@@ -228,8 +228,8 @@ class SimpleViewer(widgets.Container):
         mean_intensity = img.mean()
         std_intensity = img.std()
         self.image_layer.reset_contrast_limits()
-        contrast_min = min(mean_intensity//2, min_intensity)
-        scale = np.log2(max_intensity//mean_intensity)
+        contrast_min = int(min(mean_intensity//2, min_intensity))
+        scale = max(np.log2(max_intensity//mean_intensity), 1)
         contrast_max = int((mean_intensity+2*std_intensity) * scale)
         self.image_layer.contrast_limits = [contrast_min, contrast_max]
         
