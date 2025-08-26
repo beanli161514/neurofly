@@ -3,6 +3,7 @@ import napari.layers
 import napari.utils
 import napari.utils.notifications
 import numpy as np
+import time
 
 from brightest_path_lib.algorithm import NBAStarSearch
 
@@ -52,7 +53,7 @@ class NeuronReconstructor(SimpleViewer):
 
         self.nodes_layer.click_get_value = self.nodes_layer.get_value
         self.nodes_layer.get_value = lambda position, view_direction=None, dims_displayed=None, world=False: None
-        self.nodes_layer.mouse_drag_callbacks.append(self.viewer_node_operation)
+        self.nodes_layer.mouse_drag_callbacks.append(self.viewer_node_operation_trigger)
         self.nodes_layer.mouse_double_click_callbacks.append(self.viewer_select_task_node)
 
         self.edges_layer.click_get_value = self.edges_layer.get_value
@@ -61,10 +62,6 @@ class NeuronReconstructor(SimpleViewer):
     
     def add_shortcut(self):
         """Add keyboard shortcuts for the viewer."""
-        # remove key bind for 's' in nodes_layer
-        self.nodes_layer.bind_key('s', lambda _self, _event=None: None, overwrite=True)
-        self.nodes_layer.bind_key('z', lambda _self, _event=None: None, overwrite=True)
-        
         deconv_shortcut_fn = lambda _self, _evnet=None: self.deconv()
         self.viewer.bind_key('d', deconv_shortcut_fn, overwrite=True)
         check_shortcut_fn = lambda _self, _event=None: self.RecWidgets.on_check_button_clicked()
@@ -73,6 +70,7 @@ class NeuronReconstructor(SimpleViewer):
         self.viewer.bind_key('r', revoke_shortcut_fn, overwrite=True)
         submit_shortcut_fn = lambda _self, _event=None: self.submit()
         self.viewer.bind_key('s', submit_shortcut_fn, overwrite=True)
+        self.nodes_layer.bind_key('s', submit_shortcut_fn, overwrite=True)
     
     def on_db_loading(self):
         db_path = self.RecWidgets.get_database_path()
@@ -330,16 +328,47 @@ class NeuronReconstructor(SimpleViewer):
                 self.refresh()
                 print(f'refresh')
 
-    def viewer_node_operation(self, layer:napari.layers.Points, event):
-        global_check = self.global_viewer_status_check(check_task_node=True, check_prof_mode=True)
-        if not global_check:
+    def viewer_node_operation_trigger(self, layer:napari.layers.Points, event):
+        valid_modifiers = (
+            ('Control' in event.modifiers and event.button in [1, 2]) or
+            ('Shift' in event.modifiers and event.button in [1, 2]) or
+            (len(event.modifiers) == 0 and event.button in [1, 2])
+        )
+        if not valid_modifiers:
             return
+        
+        initial_position = event.position
+        press_time = time.time()
         index = layer.click_get_value(
             event.position,
             view_direction=event.view_direction,
             dims_displayed=event.dims_displayed,
             world=True,
         )
+        yield
+
+        drag_threshold = 3.0
+        click_time_threshold = 0.5
+        while event.type in ['mouse_move', 'mouse_release']:
+            current_time = time.time()
+            time_elapsed = current_time - press_time
+            if event.type == 'mouse_move':
+                current_position = event.position
+                drag_distance = np.linalg.norm(np.asarray(current_position)-np.asarray(initial_position))
+                if drag_distance > drag_threshold or time_elapsed > click_time_threshold:
+                    return
+            elif event.type == 'mouse_release':
+                final_position = event.position
+                final_distance = np.linalg.norm(np.asarray(final_position)-np.asarray(initial_position))
+                if final_distance <= drag_threshold and time_elapsed <= click_time_threshold:
+                    self._execute_node_operation(layer, event, index)
+                break
+            yield
+
+    def _execute_node_operation(self, layer:napari.layers.Points, event, index):
+        global_check = self.global_viewer_status_check(check_task_node=True, check_prof_mode=True)
+        if not global_check:
+            return
         # if clicked on a existing node
         if index is not None:
             nid = int(layer.properties['nids'][index])
