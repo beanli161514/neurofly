@@ -6,11 +6,16 @@ contributions:
     - id: neurofly.reconstructor
       title: Neuron Reconstructor
       python_name: neurofly:NeuronReconstructor
+    - id: neurofly.segmenter
+      title: Neuron Segmenter
+      python_name: neurofly:NeuronSegmenter
     - id: neurofly.simple_viewer
       title: Simple Viewer
       python_name: neurofly:SimpleViewer
   widgets:
     - command: neurofly.reconstructor
       display_name: Neuron Reconstructor
+    - command: neurofly.segmenter
+      display_name: Neuron Segmenter
     - command: neurofly.simple_viewer
       display_name: Simple Viewer

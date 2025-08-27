@@ -19,6 +19,15 @@
             "module": "neurofly.viewer.reconstructor",
             "console": "integratedTerminal",
             "justMyCode": true
+        },
+        {
+            "name": "Python Debugger: segmenter",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "neurofly.viewer.segmenter",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "subProcess": true
         }
     ]
 }

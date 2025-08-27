@@ -1,7 +1,7 @@
 from magicgui import widgets
 
 class ImageFinder(widgets.Container):
-    def __init__(self, **kwargs):
+    def __init__(self):
         self.image_path_widget = widgets.FileEdit(
             label='Image Path',
             tooltip='Load an image file to display in the viewer',
@@ -33,8 +33,7 @@ class ImageFinder(widgets.Container):
                 self.image_info_row,
             ],
             layout='vertical',
-            labels=False,
-            **kwargs
+            labels=False
         )
 
     def reset_image_path_widget_callback(self, on_change_callback):

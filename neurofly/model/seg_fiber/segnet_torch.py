@@ -3,7 +3,6 @@ import functools
 import torch
 import numpy as np
 
-
 def get_norm_layer(norm_type='instance', dim=2):
     if dim == 2:
         BatchNorm = nn.BatchNorm2d
@@ -24,7 +23,6 @@ def get_norm_layer(norm_type='instance', dim=2):
     else:
         raise NotImplementedError('normalization layer [%s] is not found' % norm_type)
     return norm_layer
-
 
 class DoubleConv(nn.Module):
     def __init__(self, in_channels, out_channels, *, norm_type='batch', dim=2):
@@ -53,9 +51,8 @@ class DoubleConv(nn.Module):
         x = self.conv(x)
         return x
 
-
 class UNet(nn.Module):
-    def __init__(self, in_channels=1, out_channels=1, features=[64, 128, 256, 512], *, norm_type='batch', dim=2):
+    def __init__(self, in_channels=1, out_channels=1, features=[32, 64, 128], *, norm_type='batch', dim=3):
         super(UNet, self).__init__()
         self.downs = nn.ModuleList()
         self.ups = nn.ModuleList()
@@ -109,9 +106,9 @@ class UNet(nn.Module):
         x = self.final_conv(x)
         return x
 
-
 class SegNet():
-    def __init__(self,ckpt_path,bg_thres=150):
+    def __init__(self, ckpt_path, bg_thres=150):
+        # print('=== PyTorch Model ===')
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         if 'tiny' in ckpt_path:
             model_dims = [32,64,128]
@@ -131,31 +128,34 @@ class SegNet():
         self.model = model
         self.bg_thres = bg_thres
 
-    
-    def preprocess(self,img):
+    def preprocess(self,img,percentiles=[0.1,1.0]):
         # input img: ndarray [0,65535]
         # output img: tensor [0,1]
-        min_value = img.min()
-        max_value = img.max()
-        img = (img-min_value)/(max_value-min_value)
+        img = np.clip(img, a_min=self.bg_thres, a_max=None) - self.bg_thres
+        flattened_arr = np.sort(img.flatten())
+        clip_low = int(percentiles[0] * len(flattened_arr))
+        clip_high = int(percentiles[1] * len(flattened_arr))-1
+        if flattened_arr[clip_high]<self.bg_thres:
+            return None
+        clipped_arr = np.clip(img, flattened_arr[clip_low], flattened_arr[clip_high])
+        min_value = np.min(clipped_arr)
+        max_value = np.max(clipped_arr)
+        filtered = clipped_arr
+        img = (filtered-min_value)/(max_value-min_value)
         img = img.astype(np.float32)
         img = torch.from_numpy(img)
         img = img.unsqueeze(0).unsqueeze(0)
         return img
 
-
-    def get_mask(self,img,thres=0.5):
+    def get_mask(self, img, thres=0.5):
         img_in = self.preprocess(img)
         if img_in != None:
             with torch.no_grad():
                 tensor_out = self.model(img_in.to(self.device)).cpu()
             prob = tensor_out.squeeze(0).squeeze(0)
-            if thres==None:
-                return prob.detach().numpy()
-            else:
-                voxel_mask = img > self.bg_thres
+            if thres is not None:
                 prob[prob>=thres]=1
                 prob[prob<thres]=0
-                return prob.detach().numpy()*voxel_mask
+            return prob.detach().numpy()
         else:
             return np.zeros_like(img)
