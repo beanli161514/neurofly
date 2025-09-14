@@ -112,6 +112,8 @@ class TaskManager():
                     'edges': {}
                 }
                 action.record_history(history)
+            elif action.action_type == 'deconv':
+                pass
             else:
                 raise ValueError(f"Unknown action: {action.action_type}")
             is_successed = True
@@ -139,6 +141,8 @@ class TaskManager():
             elif action.action_type == 'delete_edge':
                 self.G.add_edges(action.history['edges'])
             elif action.action_type == 'update_node':
+                pass
+            elif action.action_type == 'deconv':
                 pass
             else:
                 raise ValueError(f"Unknown action: {action.action_type}")
@@ -218,6 +222,12 @@ class TaskManager():
                 action_node = action.action_node
                 self.DB.update_nodes([action_node['nid']], creator=action_node['creator'], type=action_node['type'], checked=1)
                 self.finish_task(action_node['nid'])
+            
+            elif action.action_type == 'deconv':
+                pass
+
+            else:
+                raise ValueError(f"Unknown action: {action.action_type}")
 
     def actions_record2db(self):
         self.DB.add_actions(self.action_stack)

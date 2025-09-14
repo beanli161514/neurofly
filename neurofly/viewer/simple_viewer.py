@@ -74,8 +74,8 @@ class SimpleViewer(widgets.Container):
     
     def on_save_clicked(self):
         save_dir = self.ImageFinder.get_save_path()
-        save_name = datetime.now().strftime("%y%m%d%H%M%S")
-        save_path = os.path.join(save_dir, f"{save_name}.tif")
+        timestamp = datetime.now().strftime("%y%m%d%H%M%S")
+        save_path = os.path.join(save_dir, f"img_{timestamp}.tif")
         img = np.asarray(self.image_layer.data)
         tiff.imwrite(save_path, img.astype(np.uint16))
         print(f'Save current ROI image to ({save_path})')

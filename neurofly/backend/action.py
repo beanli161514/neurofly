@@ -7,7 +7,7 @@ class Action():
         self.action_node = action_node
         self.action_edge = action_edge
 
-        self.ACTION_TYPE_LIST = ['add_path', 'delete_node', 'delete_edge', 'update_node']
+        self.ACTION_TYPE_LIST = ['add_path', 'delete_node', 'delete_edge', 'update_node', 'deconv']
         if action_type in self.ACTION_TYPE_LIST:
             self.action_type = action_type
         else:

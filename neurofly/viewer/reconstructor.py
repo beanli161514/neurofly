@@ -1,14 +1,11 @@
 import napari
-import napari.layers
-import napari.utils
-import napari.utils.notifications
 import numpy as np
 import time
 
 from brightest_path_lib.algorithm import NBAStarSearch
 
 from .simple_viewer import SimpleViewer
-from .widget.rec_interactor import RecWidgets
+from .widget.rec_widgets import RecWidgets
 from ..model import Deconver, default_dec_weight_path
 from ..backend.task_manager import TaskManager
 from ..backend.action import Action
@@ -33,6 +30,7 @@ class NeuronReconstructor(SimpleViewer):
 
         self.TaskManager = None
         self.task_node = None
+        self.deconv_invoked = False
 
         self.RecWidgets = RecWidgets()
         self.extend([self.RecWidgets])
@@ -84,6 +82,7 @@ class NeuronReconstructor(SimpleViewer):
         if (np.array(size)<=np.array([192,]*3)).all():
             sr_img = self.Deconver.process_one(self.image_layer.data)
             self.image_layer.data = sr_img
+            self.deconv_invoked = True
         else:
             napari.utils.notifications.show_info("this image is too large, try a smaller one")
     
@@ -115,6 +114,7 @@ class NeuronReconstructor(SimpleViewer):
             super().refresh(self.get_info())
         else:
             super().refresh()
+        self.deconv_invoked = False
         self.update_contrast()
     
     def render(self, *, init_graph:bool):
@@ -470,9 +470,12 @@ class NeuronReconstructor(SimpleViewer):
             'creator': self.RecWidgets.get_username(),
             'type': self.RecWidgets.get_node_type_idx(),
         })
-        action = Action(self.RecWidgets.get_username(), self.task_node, 'update_node',
+        action_check_task_node = Action(self.RecWidgets.get_username(), self.task_node, 'update_node',
                         action_node=action_node)
-        self.TaskManager.action_stack_push(action)
+        self.TaskManager.action_stack_push(action_check_task_node)
+        if self.deconv_invoked:
+            action_deconv = Action(self.RecWidgets.get_username(), self.task_node, 'deconv')
+            self.TaskManager.action_stack_push(action_deconv)
         self.TaskManager.submit()
         self.next_task()
         self.RecWidgets.set_check_button_status('Check')

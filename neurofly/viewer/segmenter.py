@@ -2,14 +2,12 @@ import os
 import napari
 import napari.utils
 import napari.utils.notifications
-from napari.utils.progress import tqdm
 from napari.qt.threading import thread_worker
 import numpy as np
 import datetime
-import time
 
 from .simple_viewer import SimpleViewer
-from .widget.seg_interactor import SegWidget
+from .widget.seg_widgets import SegWidget
 from ..model import Deconver, default_dec_weight_path
 from ..model import Seger, SegNet, default_seger_weight_path
 from ..backend.neuron_graph import NeuroGraph

@@ -28,6 +28,15 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "subProcess": true
+        },
+        {
+            "name": "Python Debugger: skeletonizer",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "neurofly.viewer.skeletonizer",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "subProcess": true
         }
     ]
 }
