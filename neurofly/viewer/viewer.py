@@ -2,6 +2,8 @@ import os
 import numpy as np
 import tifffile as tiff
 from datetime import datetime
+from typing import Union
+import pprint
 
 from magicgui import widgets
 import napari
@@ -9,16 +11,20 @@ import napari
 from .widget.roi_selector import ROISelector
 from .widget.res_ch_selector import ResChSelector
 from .widget.image_finder import ImageFinder
+from .config.config import Config
 from ..neurodb.image_reader import ImageReader
 
 
-class SimpleViewer(widgets.Container):
-    def __init__(self, napari_viewer: napari.Viewer):
+class NeuronViewer(widgets.Container):
+    def __init__(self, napari_viewer:napari.Viewer, config:Union[Config,str]=None):
         super().__init__()
+        # config
+        self.init_config(config)
+
         # viewer
         self.viewer = napari_viewer
         self.viewer.__dict__['neurofly'] = {}
-        self.viewer.__dict__['neurofly']['simple_viewer'] = self
+        self.viewer.__dict__['neurofly']['viewer'] = self
         self.viewer.dims.ndisplay = 3
         self.viewer.layers.clear()
         self.viewer.window.remove_dock_widget('all')
@@ -26,9 +32,22 @@ class SimpleViewer(widgets.Container):
         self.goal_layer = self.viewer.add_points(ndim=3, symbol='cross', face_color='red', size=2, shading='spherical',name='goal')        
         self.viewer.layers.selection.active = self.image_layer
 
-        if type(self) is SimpleViewer:
+        if type(self) is NeuronViewer:
             self.init_attributes()
             self.add_callback()
+
+    def init_config(self, config):
+        """Initialize configuration for the SimpleViewer."""
+        if hasattr(self, 'config'):
+            return
+        if isinstance(config, str):
+            config_path = config
+            self.config = Config(config_path=config_path)
+        elif isinstance(config, Config):
+            self.config = config
+        else:
+            self.config = Config()
+        pprint.pprint(self.config.cfg)
 
     def init_attributes(self):
         """Initialize attributes for the SimpleViewer."""
@@ -39,7 +58,7 @@ class SimpleViewer(widgets.Container):
          # widgets
         self.ImageFinder = ImageFinder()
         self.ResChSelector = ResChSelector()
-        self.ROISelector = ROISelector()
+        self.ROISelector = ROISelector(**self.config.viewer_cfg.ROISelector)
         self.extend([
             self.ImageFinder,
             self.ResChSelector,
@@ -214,7 +233,7 @@ class SimpleViewer(widgets.Container):
         self.viewer.camera.angles = camera_angles
         self.viewer.camera.zoom = camera_zoom
         self.viewer.camera.center = np.array(center)
-        if type(self) is SimpleViewer:
+        if type(self) is NeuronViewer and self.config.viewer_cfg.auto_contrast:
             self.update_contrast()
         
         if info is None:
@@ -236,7 +255,7 @@ class SimpleViewer(widgets.Container):
 
 def main():
     viewer = napari.Viewer()
-    simple_viewer_container = SimpleViewer(viewer)
+    simple_viewer_container = NeuronViewer(viewer)
     viewer.window.add_dock_widget(simple_viewer_container, name="Simple Viewer")
     napari.run()
 

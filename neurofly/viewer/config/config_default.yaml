@@ -1,0 +1,31 @@
+NeuronViewer:
+  auto_contrast: true
+  ROISelector:
+    max_size: 512
+    default_center: [64, 64, 64]
+    default_size: [64, 64, 64]
+    power_step: 32
+  
+NeuronSegmenter:
+  model_ckpt_path: ''
+
+NeuronReconstructor:
+  global_task_query: |
+    WITH relevant_cid AS (
+        SELECT DISTINCT cid
+        FROM nodes
+        WHERE checked = -1
+    ),
+    cid_cnt AS (
+        SELECT cid, COUNT(*) AS cnnt_len
+        FROM nodes
+        WHERE cid IN (SELECT cid FROM relevant_cid)
+        GROUP BY cid
+    )
+    SELECT n.nid, n.x, n.y, n.z, c.cnnt_len
+    FROM nodes n
+    JOIN cid_cnt c ON n.cid = c.cid
+    WHERE n.checked = -1
+    ORDER BY c.cnnt_len DESC;
+  auto_contrast: true
+  DFS: true

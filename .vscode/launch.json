@@ -5,10 +5,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: simple_viewer",
+            "name": "Python Debugger: viewer",
             "type": "debugpy",
             "request": "launch",
-            "module": "neurofly.viewer.simple_viewer",
+            "module": "neurofly.viewer.viewer",
             "console": "integratedTerminal",
             "justMyCode": true
         },

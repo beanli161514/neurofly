@@ -1,19 +1,25 @@
 import napari
 import numpy as np
 import time
+from typing import Union
 
 from brightest_path_lib.algorithm import NBAStarSearch
 
-from .simple_viewer import SimpleViewer
+from .viewer import NeuronViewer
 from .widget.rec_widgets import RecWidgets
+from .config.config import Config
 from ..model import Deconver, default_dec_weight_path
 from ..backend.task_manager import TaskManager
 from ..backend.action import Action
 
 
-class NeuronReconstructor(SimpleViewer):
-    def __init__(self, napari_viewer:napari.Viewer):
+class NeuronReconstructor(NeuronViewer):
+    def __init__(self, napari_viewer:napari.Viewer, config:Union[Config,str]=None):
+        # config
+        self.init_config(config)
         super().__init__(napari_viewer)
+
+        # viewer
         self.viewer.__dict__['neurofly']['reconstructor'] = self
         self.nodes_layer = self.viewer.add_points(ndim=3, size=1, shading='spherical', name='nodes')
         self.edges_layer = self.viewer.add_vectors(ndim=3, vector_style='line', edge_color='orange', edge_width=0.3, name='edges')
@@ -60,19 +66,31 @@ class NeuronReconstructor(SimpleViewer):
     
     def add_shortcut(self):
         """Add keyboard shortcuts for the viewer."""
+        # deconv
         deconv_shortcut_fn = lambda _self, _evnet=None: self.deconv()
         self.viewer.bind_key('d', deconv_shortcut_fn, overwrite=True)
+        # check
         check_shortcut_fn = lambda _self, _event=None: self.RecWidgets.on_check_button_clicked()
         self.viewer.bind_key('c', check_shortcut_fn, overwrite=True)
+        # revoke
         revoke_shortcut_fn = lambda _self, _event=None: self.revoke()
         self.viewer.bind_key('r', revoke_shortcut_fn, overwrite=True)
+        # submit
         submit_shortcut_fn = lambda _self, _event=None: self.submit()
         self.viewer.bind_key('s', submit_shortcut_fn, overwrite=True)
         self.nodes_layer.bind_key('s', submit_shortcut_fn, overwrite=True)
+        # proof
+        proofread_shortcut_fn = lambda _self, _event=None: self.RecWidgets.set_proofreading_mode(not self.RecWidgets.get_proofreading_mode()); self.proofread()
+        self.viewer.bind_key('x', proofread_shortcut_fn, overwrite=True)
+        # auto connect
+        auto_cnnt1nbr_shortcut_fn = lambda _self, _event=None: self.viewer_auto_connect_nearest(1)
+        auto_cnnt2nbrs_shortcut_fn = lambda _self, _event=None: self.viewer_auto_connect_nearest(2)
+        self.viewer.bind_key('q', auto_cnnt1nbr_shortcut_fn, overwrite=True)
+        self.viewer.bind_key('w', auto_cnnt2nbrs_shortcut_fn, overwrite=True)
     
     def on_db_loading(self):
         db_path = self.RecWidgets.get_database_path()
-        self.TaskManager = TaskManager(db_path)
+        self.TaskManager = TaskManager(db_path, config=self.config)
         self.task_node = self.TaskManager.task_node
         self.action_node = self.TaskManager.action_node
         self.refresh()
@@ -115,7 +133,8 @@ class NeuronReconstructor(SimpleViewer):
         else:
             super().refresh()
         self.deconv_invoked = False
-        self.update_contrast()
+        if self.config.reconstructor_cfg.auto_contrast:
+            self.update_contrast()
     
     def render(self, *, init_graph:bool):
         # clear layers
@@ -455,6 +474,40 @@ class NeuronReconstructor(SimpleViewer):
                     is_successed = self.action_delete_edge(self.task_node, self.action_node, self.action_edge)
                     if is_successed:
                         self.render(init_graph=False)
+
+    def viewer_auto_connect_nearest(self, num_nbrs:int=1):
+        if not self.global_viewer_status_check(check_task_node=True, check_prof_mode=True):
+            return
+        if num_nbrs <= 0 or num_nbrs > 2:
+            napari.utils.notifications.show_info("Only 1 or 2 nearest neighbors can be auto-connected.")
+            return
+        center, size = self.ROISelector.get_roi()
+        if (size > np.array([256,]*3)).any():
+            napari.utils.notifications.show_info("The ROI size is too large, please zoom in to a smaller ROI (max size: 256).")
+            return
+
+        self.task_node = self.TaskManager.task_node
+        # find nearest end nodes to the task node
+        nodes_deg1 = self.TaskManager.G.get_nodes_by_degree(degree=1, except_nids=[self.task_node['nid']])
+        if len(nodes_deg1) == 0:
+            napari.utils.notifications.show_info("No end nodes available to connect.")
+            return
+        # cal distance
+        nodes_coords = np.array([node['coord'] for node in nodes_deg1])
+        dists = np.linalg.norm(nodes_coords - np.array(self.task_node['coord']), axis=1)
+        nearest_idxs = np.argsort(dists)[:num_nbrs]
+        nearest_nodes = [nodes_deg1[i] for i in nearest_idxs]
+
+        # connect to the nearest nodes
+        is_successed = False
+        for action_node in nearest_nodes:
+            _is_successed = self.action_add_path(self.task_node, action_node, new_action_node=False, use_astar=True)
+            if _is_successed:
+                print(f'[Action] add path from task node ({self.task_node["nid"]}) to nearest node ({action_node["nid"]})')
+            is_successed = is_successed or _is_successed
+        if is_successed:
+            self.render(init_graph=False)
+            print(f'render')
     
     def revoke(self):
         self.TaskManager.action_stack_pop()

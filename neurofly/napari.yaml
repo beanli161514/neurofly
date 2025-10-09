@@ -12,9 +12,9 @@ contributions:
     - id: neurofly.skeletonizer
       title: Neuron Skeletonizer
       python_name: neurofly:NeuronSkeletonizer
-    - id: neurofly.simple_viewer
-      title: Simple Viewer
-      python_name: neurofly:SimpleViewer
+    - id: neurofly.viewer
+      title: Neuron Viewer
+      python_name: neurofly:NeuronViewer
   widgets:
     - command: neurofly.reconstructor
       display_name: Neuron Reconstructor
@@ -22,5 +22,5 @@ contributions:
       display_name: Neuron Segmenter
     - command: neurofly.skeletonizer
       display_name: Neuron Skeletonizer
-    - command: neurofly.simple_viewer
-      display_name: Simple Viewer
+    - command: neurofly.viewer
+      display_name: Neuron Viewer

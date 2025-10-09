@@ -748,28 +748,13 @@ class NeurodbSQLite:
         self.add_edges(edges_entries)
         print(f'Adding {len(edges_entries)} edges to database')
     
-    def read_tasks(self):
+    def read_tasks(self, query:str):
+        if not query or query.strip() == '':
+            # query = "SELECT nid, x, y, z FROM nodes WHERE checked=-1"
+            return []
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        query = """
-            WITH relevant_cid AS (
-                SELECT DISTINCT cid
-                FROM nodes
-                WHERE checked = -1
-            ),
-            cid_cnt AS (
-                SELECT cid, COUNT(*) AS cnnt_len
-                FROM nodes
-                WHERE cid IN (SELECT cid FROM relevant_cid)
-                GROUP BY cid
-            )
-            SELECT n.nid, n.x, n.y, n.z, c.cnnt_len
-            FROM nodes n
-            JOIN cid_cnt c ON n.cid = c.cid
-            WHERE n.checked = -1
-            ORDER BY c.cnnt_len DESC;
-        """
         cursor.execute(query)
         rows = cursor.fetchall()
         tasks = []
@@ -777,7 +762,6 @@ class NeurodbSQLite:
             tasks.append({
                 'nid': row['nid'],
                 'coord': [row['x'], row['y'], row['z']],
-                'cnnt_len': row['cnnt_len']
             })
         conn.close()
         return tasks

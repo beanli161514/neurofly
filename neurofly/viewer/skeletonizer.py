@@ -5,11 +5,11 @@ import numpy as np
 import napari
 from brightest_path_lib.algorithm import NBAStarSearch
 
-from .simple_viewer import SimpleViewer
+from .viewer import NeuronViewer
 from .widget.skel_widgets import SkelWidget
 
 
-class NeuronSkeletonizer(SimpleViewer):
+class NeuronSkeletonizer(NeuronViewer):
     def __init__(self, napari_viewer:napari.Viewer):
         super().__init__(napari_viewer)
         self.viewer.__dict__['neurofly']['skeletonizer'] = self

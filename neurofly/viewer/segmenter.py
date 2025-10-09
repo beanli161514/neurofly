@@ -6,17 +6,22 @@ from napari.qt.threading import thread_worker
 import numpy as np
 import datetime
 
-from .simple_viewer import SimpleViewer
+from .viewer import NeuronViewer
 from .widget.seg_widgets import SegWidget
+from .config.config import Config
 from ..model import Deconver, default_dec_weight_path
 from ..model import Seger, SegNet, default_seger_weight_path
 from ..backend.neuron_graph import NeuroGraph
 from ..neurodb.neurodb_sqlite import NeurodbSQLite
 
 
-class NeuronSegmenter(SimpleViewer):
+class NeuronSegmenter(NeuronViewer):
     def __init__(self, napari_viewer:napari.Viewer):
         super().__init__(napari_viewer)
+        # config
+        self.config = Config()
+
+        # viewer
         self.viewer.__dict__['neurofly']['segmenter'] = self
         self.nodes_layer = self.viewer.add_points(ndim=3, size=1, shading='spherical', name='nodes')
         self.edges_layer = self.viewer.add_vectors(ndim=3, vector_style='line', edge_color='orange', edge_width=0.3, name='edges')
@@ -36,8 +41,11 @@ class NeuronSegmenter(SimpleViewer):
         self.extend([self.SegWidget])
 
     def _init_segn_net(self):
+        seger_ckpt_path = self.config.segmenter_cfg.model_ckpt_path
+        if seger_ckpt_path.strip() == '' or not os.path.exists(seger_ckpt_path):
+            seger_ckpt_path = default_seger_weight_path
         bg_thres = self.SegWidget.get_bg_threshold()
-        self.seg_net = SegNet(default_seger_weight_path, bg_thres=bg_thres)
+        self.seg_net = SegNet(seger_ckpt_path, bg_thres=bg_thres)
         self.seger = Seger(self.seg_net)
 
     def init_model(self):

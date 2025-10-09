@@ -1,11 +1,17 @@
+import os
+import json
+import pprint
+
 from .action import Action
 from .neuron_graph import NeuroGraph
 from .tasks import Tasks
 from ..neurodb.neurodb_sqlite import NeurodbSQLite
+from ..viewer.config.config import Config
 
 class TaskManager():
-    def __init__(self, db_path:str=None):
+    def __init__(self, db_path:str, config:Config=None):
         self.db_path = db_path
+        self.config = config
         self.DB = NeurodbSQLite(db_path)
         self.G = NeuroGraph()
         self.G_prof = NeuroGraph()
@@ -29,8 +35,26 @@ class TaskManager():
         self.MAX_SID, _ = self.DB.get_max_sid_version()
     
     def init_task(self):
-        tasks = self.DB.read_tasks() if self.DB else []
+        if self.DB:
+            global_task_query = ''
+            # use the global_task_query in config if available
+            if self.config:
+                global_task_query = self.config.reconstructor_cfg.global_task_query
+            if global_task_query.endswith('.json') and os.path.exists(global_task_query):
+                tasks = self.read_task_from_json(global_task_query)
+                pprint.pprint(f'Loaded {len(tasks)} tasks from json file: {global_task_query}')
+            else:
+                tasks = self.DB.read_tasks(global_task_query)
+                pprint.pprint(f'Loaded {len(tasks)} tasks from db with query: {global_task_query}')
+        else:
+            tasks = []
         self.TASKS = Tasks(tasks)
+
+    def read_task_from_json(self, json_path:str):
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+            tasks = data['tasks']
+        return tasks
     
     def reset_task_status(self):
         self.TASKS.reset_idx()
@@ -42,14 +66,22 @@ class TaskManager():
         return self.TASKS.get_status()
 
     def get_next_task(self):
-        task_nid_dynamic = self.TASKS.get_task_from_dynamicStack()
-        if task_nid_dynamic is not None:
-            task_node = self.set_task_node(task_nid_dynamic)
+        # use DFS to get the next task from dynamic stack if possible
+        if self.config.reconstructor_cfg.DFS:
+            task_nid_dynamic = self.TASKS.get_task_from_dynamicStack()
+            if task_nid_dynamic is not None:
+                task_node = self.set_task_node(task_nid_dynamic)
+            else:
+                # if dynamic stack is empty, get a task from unchecked list and add it to dynamic stack
+                # but not set it as task node in this round
+                task_node = None
+                task_nid_unchecked = self.TASKS.get_task_from_unchecked()
+                if task_nid_unchecked is not None:
+                    self.TASKS.add_task_in_dynamicStack({task_nid_unchecked: self.TASKS.TASKS[task_nid_unchecked]})
+        # just get the next task from unchecked list
         else:
-            task_node = None
             task_nid_unchecked = self.TASKS.get_task_from_unchecked()
-            if task_nid_unchecked is not None:
-                self.TASKS.add_task_in_dynamicStack({task_nid_unchecked: self.TASKS.TASKS[task_nid_unchecked]})
+            task_node = self.set_task_node(task_nid_unchecked)
         return task_node
     
     def get_last_task(self):
@@ -69,7 +101,7 @@ class TaskManager():
             self.task_node = None
         else:
             self.task_node = self.DB.read_one_node(nid)
-            if init_dynamic_stack and nid not in self.TASKS.DynamicStack:
+            if self.config.reconstructor_cfg.DFS and init_dynamic_stack and nid not in self.TASKS.DynamicStack:
                 self.TASKS.init_dynamic_stack(nid)
         return self.task_node
 
@@ -188,7 +220,8 @@ class TaskManager():
                         self.action_stack[a_idx].action_node['nid'] = nid
                     added_nodes[nid] = node_data
                 self.DB.add_nodes(added_nodes)
-                self.update_taskTree_from_action(action)
+                if self.config.reconstructor_cfg.DFS:
+                    self.update_taskTree_from_action(action)
 
                 # add new path edges
                 for (src, dst), edge_data in action.path_edges.items():

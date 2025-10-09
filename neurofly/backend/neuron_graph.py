@@ -44,6 +44,20 @@ class NeuroGraph():
             if self.graph.has_edge(src, dst):
                 self.graph.remove_edge(src, dst)
 
+    def get_nodes_by_degree(self, degree:int, except_nids:list=[]):
+        nodes = []
+        except_cc = set()
+        for nid in except_nids:
+            if nid in self.graph:
+                cc = nx.node_connected_component(self.graph, nid)
+                except_cc.update(cc)
+        except_nids = set(except_nids).union(except_cc)
+        for nid, deg in self.graph.degree:
+            if deg == degree and nid not in except_nids:
+                _node = {'nid': nid, 'coord': self.graph.nodes[nid]['coord']}
+                nodes.append(_node)
+        return nodes
+
     def get_render_data(self, task_node:dict=None):
         def __gene_group_color__(groups:list):
             n_group = len(groups)
