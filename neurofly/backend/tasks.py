@@ -10,13 +10,16 @@ class Tasks():
         self.CheckedList = []
         if tasks is not None:
             for idx, task in enumerate(tasks):
-                self.UncheckedList.append(task['nid'])
                 self.TASKS[task['nid']] = {
                     'idx': idx,
                     'nid': task['nid'],
-                    'checked': -1,
+                    'checked': task.get('checked', -1),
                     'coord': task['coord'],
                 }
+                if task.get('checked', -1) == -1:
+                    self.UncheckedList.append(task['nid'])
+                else:
+                    self.CheckedList.append(task['nid'])
 
     def init_dynamic_stack(self, nid=None):
         if nid is not None:
@@ -25,9 +28,18 @@ class Tasks():
             self.DynamicStack = []
     
     def reset_idx(self):
-        self.idx_unchecked = 0
-        self.idx_checked = -1
+        self.reset_dynamic_idx()
+        self.reset_unchecked_idx()
+        self.reset_checked_idx()
+    
+    def reset_dynamic_idx(self):
         self.idx_dynamic = -1
+
+    def reset_unchecked_idx(self):
+        self.idx_unchecked = 0
+    
+    def reset_checked_idx(self):
+        self.idx_checked = -1
     
     def add_task_in_dynamicStack(self, nodes:dict):
         for _nid, _node in nodes.items():
@@ -47,9 +59,12 @@ class Tasks():
         len_checked = len(self.CheckedList)
         len_dynamic = len(self.DynamicStack)
         status = {
+            'dynamic_length': len_dynamic,
             'unchecked_length': len_unchecked,
             'checked_length': len_checked,
-            'dynamic_length': len_dynamic
+            'idx_dynamic': self.idx_dynamic,
+            'idx_unchecked': self.idx_unchecked,
+            'idx_checked': self.idx_checked,
         }
         return status
 
@@ -73,7 +88,7 @@ class Tasks():
     def get_task_from_checked(self):
         task_nid = None
         if self.CheckedList:
-            idx = len(self.CheckedList) + self.idx_checked % len(self.CheckedList)
+            idx = self.idx_checked % len(self.CheckedList)
             self.idx_checked -= 1
             task_nid = self.CheckedList[idx]
         return task_nid
@@ -86,3 +101,15 @@ class Tasks():
             self.UncheckedList.pop(idx)
             self.TASKS[nid]['checked'] = 1
         self.CheckedList.append(nid)
+    
+    def remove_task(self, nid):
+        if nid in self.DynamicStack:
+            self.DynamicStack.remove(nid)
+        if nid in self.UncheckedList:
+            idx = self.UncheckedList.index(nid)
+            self.UncheckedList.pop(idx)
+            del self.TASKS[nid]
+        if nid in self.CheckedList:
+            idx = self.CheckedList.index(nid)
+            self.CheckedList.pop(idx)
+            del self.TASKS[nid]

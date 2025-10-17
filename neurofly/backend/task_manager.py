@@ -53,7 +53,16 @@ class TaskManager():
     def read_task_from_json(self, json_path:str):
         with open(json_path, 'r') as f:
             data = json.load(f)
-            tasks = data['tasks']
+            candidate_tasks = data['tasks']
+        candidate_task_nids = [task['nid'] for task in candidate_tasks]
+        valid_nodes = self.DB.read_nodes(candidate_task_nids)
+        tasks = []
+        for nid, node in valid_nodes.items():
+            tasks.append({
+                'nid': nid,
+                'coord': node['coord'],
+                'checked': node['checked'],
+            })
         return tasks
     
     def reset_task_status(self):
@@ -82,12 +91,14 @@ class TaskManager():
         else:
             task_nid_unchecked = self.TASKS.get_task_from_unchecked()
             task_node = self.set_task_node(task_nid_unchecked)
+        self.TASKS.reset_checked_idx()
         return task_node
     
     def get_last_task(self):
         task_nid = self.TASKS.get_task_from_checked()
         if task_nid is not None:
             task_node = self.set_task_node(task_nid, init_dynamic_stack=False)
+            self.TASKS.reset_unchecked_idx()
         else:
             task_node = None
         return task_node
@@ -240,6 +251,7 @@ class TaskManager():
                 # action node and its edges are also recorded in the action.history
                 deleted_nids = [action.action_node['nid']]
                 self.DB.delete_nodes(deleted_nids)
+                self.TASKS.remove_task(deleted_nids[0])
 
                 deleted_SrcDst = action.history['edges'].keys()
                 self.DB.delete_edges(deleted_SrcDst)

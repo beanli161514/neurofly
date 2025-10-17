@@ -22,7 +22,7 @@ NeuronReconstructor:
         WHERE cid IN (SELECT cid FROM relevant_cid)
         GROUP BY cid
     )
-    SELECT n.nid, n.x, n.y, n.z, c.cnnt_len
+    SELECT n.nid, n.x, n.y, n.z, n.checked, c.cnnt_len
     FROM nodes n
     JOIN cid_cnt c ON n.cid = c.cid
     WHERE n.checked = -1
