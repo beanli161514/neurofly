@@ -107,13 +107,13 @@ class NeuronReconstructor(NeuronViewer):
     def get_task_info(self):
         task_nid = self.TaskManager.task_node['nid'] if self.TaskManager.task_node else None
         status = self.TaskManager.get_task_status()
-        info = f'Task Node ID: {task_nid}\n'
-        info += f'Dynamic Tasks: {status['dynamic_length']}\n'
-        info += f'Unchecked Tasks: {status['unchecked_length']}\n'
-        info += f'Checked Tasks: {status['checked_length']}\n'
-        info += f'Dynamic Index: {status['idx_dynamic']+1}\n'
-        info += f'Unchecked Index: {status['idx_unchecked']-1}\n'
-        info += f'Checked Index: {status['idx_checked']+1}\n'
+        info = f"Task Node ID: {task_nid}\n"
+        info += f"Dynamic Tasks: {status['dynamic_length']}\n"
+        info += f"Unchecked Tasks: {status['unchecked_length']}\n"
+        info += f"Checked Tasks: {status['checked_length']}\n"
+        info += f"Dynamic Index: {status['idx_dynamic']+1}\n"
+        info += f"Unchecked Index: {status['idx_unchecked']-1}\n"
+        info += f"Checked Index: {status['idx_checked']+1}\n"
         return info
 
     def get_info(self):
