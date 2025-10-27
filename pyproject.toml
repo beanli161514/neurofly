@@ -27,7 +27,7 @@ dependencies = [
     "scikit-image",
     "scipy",
     "torch",
-    "tinygrad=0.9.2",
+    "tinygrad==0.9.2",
     "pathlib",
     "h5py",
     "zarr"
