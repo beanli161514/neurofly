@@ -1,11 +1,14 @@
+from datetime import datetime
+
 class Action():
     def __init__(self, creator:str, task_node:dict, action_type:str, *, 
                  action_node:dict=None, action_edge:dict=None,
-                 path_nodes:dict={}, path_edges:dict={}):
+                 path_nodes:dict={}, path_edges:dict={}, date=None):
         self.creator = creator
         self.task_node = task_node
         self.action_node = action_node
         self.action_edge = action_edge
+        self.date = date if date else datetime.now()
 
         self.ACTION_TYPE_LIST = ['add_path', 'delete_node', 'delete_edge', 'update_node', 'deconv']
         if action_type in self.ACTION_TYPE_LIST:

@@ -140,7 +140,7 @@ class NeuronViewer(widgets.Container):
         spacing_target = self.IMAGE.info[level_target]['spacing']
         scale = [i/j for i,j in zip(spaceing_current,spacing_target)]
 
-        self.ResChSelector.set_resolution(self.IMAGE.resolution_levels[level_target])
+        self.ResChSelector.set_resolution(self.IMAGE.resolution_levels[level_target], block=True)
 
         center_target = [int(center[i] * scale[i]) for i in range(3)]
         self.ROISelector.set_center(center_target)
@@ -161,7 +161,7 @@ class NeuronViewer(widgets.Container):
         spacing_target = self.IMAGE.info[level_target]['spacing']
         scale = [i/j for i,j in zip(spaceing_current,spacing_target)]
 
-        self.ResChSelector.set_resolution(self.IMAGE.resolution_levels[level_target])
+        self.ResChSelector.set_resolution(self.IMAGE.resolution_levels[level_target], block=True)
 
         center_target = [int(center[i] * scale[i]) for i in range(3)]
         self.ROISelector.set_center(center_target)

@@ -325,7 +325,7 @@ class NeurodbSQLite:
                             {'nodes':action.history['nodes'],
                              'edges':__dictWithTupleKey2list__(action.history['edges'])}
                         ) if action.history else None,
-                    'date': date
+                    'date': action.date if action.date else date
                 })
             cursor.executemany(
                 "INSERT INTO actions " +

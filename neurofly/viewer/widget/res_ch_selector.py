@@ -85,10 +85,14 @@ class ResChSelector(widgets.Container):
         self.refresh_button.clicked.disconnect()
         self.refresh_button.clicked.connect(refresh_callback)
     
-    def set_resolution(self, resolution):
+    def set_resolution(self, resolution, block=False):
         """Set the currently selected resolution."""
         if resolution in self.resolution_combobox.choices:
+            if block:
+                self.resolution_combobox.changed.block()
             self.resolution_combobox.value = resolution
+            if block:
+                self.resolution_combobox.changed.unblock()
         else:
             raise ValueError(f"Resolution '{resolution}' not in available choices.")
     
