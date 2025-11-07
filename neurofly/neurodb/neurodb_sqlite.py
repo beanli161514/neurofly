@@ -561,6 +561,45 @@ class NeurodbSQLite:
         conn.close()
         return nodes
     
+    def read_actions(self, nids:list=None):
+        def __parser_history__(_pickle:str):
+            _history = json.loads(_pickle)
+            _edges_list = _history['edges']
+            _edges_dict = {}
+            for _e_key, _e_value in _edges_list:
+                _edges_dict[tuple(_e_key)] = _e_value
+            _history['edges'] = _edges_dict
+            return _history
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        if nids:
+            query = f"SELECT * FROM actions WHERE nid IN ({','.join('?' for _ in nids)}) ORDER BY aid ASC;"
+            cursor.execute(query, nids)
+        else:
+            query = "SELECT * FROM actions ORDER BY aid ASC;"
+            cursor.execute(query)
+        rows = cursor.fetchall()
+        actions = {}
+        for _action in rows:
+            actions[_action['aid']] = {
+                'aid': _action['aid'],
+                'type': _action['type'],
+                'task_nid': _action['task_nid'],
+                'task_node': json.loads(_action['task_node']),
+                'action_nid': _action['action_nid'] ,
+                'action_node': json.loads(_action['action_node']) if _action['action_node'] else None,
+                'action_edge_src': _action['action_edge_src'],
+                'action_edge_dst': _action['action_edge_dst'],
+                'path_nodes': json.loads(_action['path_nodes']) if _action['path_nodes'] else None,
+                'path_edges': json.loads(_action['path_edges']) if _action['path_edges'] else None,
+                'creator': _action['creator'],
+                'history': __parser_history__(_action['history']) if _action['history'] else None,
+                'date': _action['date']
+            }
+        conn.close()
+        return actions
+
     def delete_nodes(self, nids):
         # given a list of nid, delete nodes from nodes table and edges from edges table
         conn = sqlite3.connect(self.db_path)
