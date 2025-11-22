@@ -5,12 +5,12 @@ from typing import Union
 
 from brightest_path_lib.algorithm import NBAStarSearch
 
-from .viewer import NeuronViewer
-from .widget.rec_widgets import RecWidgets
-from .config.config import Config
-from ..model import Deconver, default_dec_weight_path
-from ..backend.task_manager import TaskManager
-from ..backend.action import Action
+from neurofly.viewer.viewer import NeuronViewer
+from neurofly.viewer.widget.rec_widgets import RecWidgets
+from neurofly.viewer.config.config import Config
+from neurofly.model import Deconver, default_dec_weight_path
+from neurofly.backend.task_manager import TaskManager
+from neurofly.backend.action import Action
 
 
 class NeuronReconstructor(NeuronViewer):

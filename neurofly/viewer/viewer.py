@@ -8,11 +8,11 @@ import pprint
 from magicgui import widgets
 import napari
 
-from .widget.roi_selector import ROISelector
-from .widget.res_ch_selector import ResChSelector
-from .widget.image_finder import ImageFinder
-from .config.config import Config
-from ..neurodb.image_reader import ImageReader
+from neurofly.viewer.widget.roi_selector import ROISelector
+from neurofly.viewer.widget.res_ch_selector import ResChSelector
+from neurofly.viewer.widget.image_finder import ImageFinder
+from neurofly.viewer.config.config import Config
+from neurofly.neurodb.image_reader import ImageReader
 
 
 class NeuronViewer(widgets.Container):

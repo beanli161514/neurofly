@@ -10,11 +10,11 @@ default_transformer_weight_path = str(package_dir / 'tracer' / 'next_pos.pth')
 
 # if nvidia gpu is available, use pytorch to inference, else use tinygrad
 if torch.cuda.is_available():
-    from .seg_fiber.segnet_torch import SegNet
-    from .resin.mpcn_torch import Deconver
+    from neurofly.model.seg_fiber.segnet_torch import SegNet
+    from neurofly.model.resin.mpcn_torch import Deconver
 else:
-    from .seg_fiber.segnet_tinygrad import SegNet
-    from .resin.mpcn_tinygrad import Deconver
+    from neurofly.model.seg_fiber.segnet_tinygrad import SegNet
+    from neurofly.model.resin.mpcn_tinygrad import Deconver
 
-from .tracer.twoway_transformer import PosPredictor
-from .seg_fiber.seger import Seger
+from neurofly.model.tracer.twoway_transformer import PosPredictor
+from neurofly.model.seg_fiber.seger import Seger

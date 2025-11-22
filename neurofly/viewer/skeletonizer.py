@@ -5,8 +5,8 @@ import numpy as np
 import napari
 from brightest_path_lib.algorithm import NBAStarSearch
 
-from .viewer import NeuronViewer
-from .widget.skel_widgets import SkelWidget
+from neurofly.viewer.viewer import NeuronViewer
+from neurofly.viewer.widget.skel_widgets import SkelWidget
 
 
 class NeuronSkeletonizer(NeuronViewer):

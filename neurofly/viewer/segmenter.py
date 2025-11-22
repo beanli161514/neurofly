@@ -6,13 +6,13 @@ from napari.qt.threading import thread_worker
 import numpy as np
 import datetime
 
-from .viewer import NeuronViewer
-from .widget.seg_widgets import SegWidget
-from .config.config import Config
-from ..model import Deconver, default_dec_weight_path
-from ..model import Seger, SegNet, default_seger_weight_path
-from ..backend.neuron_graph import NeuroGraph
-from ..neurodb.neurodb_sqlite import NeurodbSQLite
+from neurofly.viewer.viewer import NeuronViewer
+from neurofly.viewer.widget.seg_widgets import SegWidget
+from neurofly.viewer.config.config import Config
+from neurofly.model import Deconver, default_dec_weight_path
+from neurofly.model import Seger, SegNet, default_seger_weight_path
+from neurofly.backend.neuron_graph import NeuroGraph
+from neurofly.neurodb.neurodb_sqlite import NeurodbSQLite
 
 
 class NeuronSegmenter(NeuronViewer):

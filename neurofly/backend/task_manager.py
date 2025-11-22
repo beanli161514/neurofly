@@ -2,11 +2,11 @@ import os
 import json
 import pprint
 
-from .action import Action
-from .neuron_graph import NeuroGraph
-from .tasks import Tasks
-from ..neurodb.neurodb_sqlite import NeurodbSQLite
-from ..viewer.config.config import Config
+from neurofly.backend.action import Action
+from neurofly.backend.neuron_graph import NeuroGraph
+from neurofly.backend.tasks import Tasks
+from neurofly.neurodb.neurodb_sqlite import NeurodbSQLite
+from neurofly.viewer.config.config import Config
 
 class TaskManager():
     def __init__(self, db_path:str, config:Config=None):
