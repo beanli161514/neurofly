@@ -111,9 +111,9 @@ class NeuronReconstructor(NeuronViewer):
         info += f"Dynamic Tasks: {status['dynamic_length']}\n"
         info += f"Unchecked Tasks: {status['unchecked_length']}\n"
         info += f"Checked Tasks: {status['checked_length']}\n"
-        info += f"Dynamic Index: {status['idx_dynamic']+1}\n"
-        info += f"Unchecked Index: {status['idx_unchecked']-1}\n"
-        info += f"Checked Index: {status['idx_checked']+1}\n"
+        info += f"Dynamic Index: {status['idx_dynamic']}\n"
+        info += f"Unchecked Index: {status['idx_unchecked']}\n"
+        info += f"Checked Index: {status['idx_checked']}\n"
         return info
 
     def get_info(self):
@@ -233,7 +233,15 @@ class NeuronReconstructor(NeuronViewer):
         # if distance is small, just connect the nodes directly
         if distance <= 5:
             if new_dst_node:
-                edges[(-1, src_nid)] = {}
+                neg_temp_max_nid = self.TaskManager.G.get_neg_temp_max_nid()
+                neg_temp_max_nid += 1
+                _neg_temp_nid = -(neg_temp_max_nid)
+                nodes[_neg_temp_nid] = {
+                    'coord': dst_coord.tolist(),
+                    'checked': -1
+                }
+                edges[(src_nid, _neg_temp_nid)] = {}
+                self.TaskManager.G.set_neg_temp_max_nid(neg_temp_max_nid)
             else:
                 edges[(src_nid, dst_nid)] = {}
         # if distance is large, use A* algorithm to find the path

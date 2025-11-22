@@ -74,6 +74,8 @@ class Tasks():
             # depth-first search to get the last task
             idx = max(len(self.DynamicStack) + self.idx_dynamic, 0) % len(self.DynamicStack)
             self.idx_dynamic -= 1
+            if -(self.idx_dynamic) > len(self.DynamicStack):
+                self.idx_dynamic = -1
             task_nid = self.DynamicStack[idx]
         return task_nid
 
