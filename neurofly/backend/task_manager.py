@@ -265,7 +265,7 @@ class TaskManager():
                 # check the task node (== action_node)
                 action.action_node.update({'checked': 1})
                 action_node = action.action_node
-                self.DB.update_nodes([action_node['nid']], creator=action_node['creator'], type=action_node['type'], checked=1)
+                self.DB.update_nodes([action_node['nid']], creator=action_node['creator'], ntype=action_node['type'], checked=1)
                 self.finish_task(action_node['nid'])
             
             elif action.action_type == 'deconv':

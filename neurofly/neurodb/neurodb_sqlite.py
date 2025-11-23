@@ -343,27 +343,59 @@ class NeurodbSQLite:
             conn.close()
             raise E
     
-    def read_nodes(self, nids:list):
+    def read_nodes(self, nids:list=None, ntype:int=None, checked:int=None, cid:int=None, sid:int=None):
+        if nids is None and ntype is None and checked is None and cid is None and sid is None:
+            return {}
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        query = f"SELECT * FROM nodes WHERE nid IN ({','.join('?' for _ in nids)})"
-        cursor.execute(query, nids)
+
+        where_parts = []
+        params = []
+        # nids
+        if isinstance(nids, str) and nids == "*":
+            pass
+        elif isinstance(nids, (list, tuple)):
+            placeholders = ",".join("?" for _ in nids)
+            where_parts.append(f"nid IN ({placeholders})")
+            params.extend(nids)
+        # type
+        if ntype is not None:
+            where_parts.append("type = ?")
+            params.append(ntype)
+        # checked
+        if checked is not None:
+            where_parts.append("checked = ?")
+            params.append(checked)
+        # cid
+        if cid is not None:
+            where_parts.append("cid = ?")
+            params.append(cid)
+        if sid is not None:
+            where_parts.append("sid = ?")
+            params.append(sid)
+        where_clause = ""
+        if where_parts:
+            where_clause = "WHERE " + " AND ".join(where_parts)
+        query = f"SELECT * FROM nodes {where_clause}"
+        cursor.execute(query, params)
         rows = cursor.fetchall()
+
         nodes = {}
         for row in rows:
-            nid = row['nid']
+            nid = row["nid"]
             nodes[nid] = {
-                'nid': nid,
-                'coord': [row['x'], row['y'], row['z']],
-                'creator': row['creator'],
-                'type': row['type'],
-                'checked': row['checked'],
-                'status': row['status'],
-                'sid': row['sid'],
-                'cid': row['cid'],
-                'date': row['date']
+                "nid": nid,
+                "coord": [row["x"], row["y"], row["z"]],
+                "creator": row["creator"],
+                "type": row["type"],
+                "checked": row["checked"],
+                "status": row["status"],
+                "sid": row["sid"],
+                "cid": row["cid"],
+                "date": row["date"],
             }
+
         conn.close()
         return nodes
 
@@ -482,7 +514,7 @@ class NeurodbSQLite:
         conn.close()
         return nodes, edges
     
-    def read_connected_components(self, nid: int, with_edges: bool = False):
+    def read_connected_components(self, nid:int, with_edges:bool=False):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -497,13 +529,16 @@ class NeurodbSQLite:
             if current_nid in visited_nid:
                 continue
             visited_nid.add(current_nid)
-            cursor.execute("SELECT nid, x, y, z, type FROM nodes WHERE nid=?;", (current_nid,))
+            cursor.execute("SELECT nid, x, y, z, type, checked, cid, sid FROM nodes WHERE nid=?;", (current_nid,))
             row = cursor.fetchone()
             if row:
                 nodes[row['nid']] = {
                     'nid': row['nid'],
                     'coord': [row['x'], row['y'], row['z']],
-                    'type': row['type']
+                    'type': row['type'],
+                    'checked': row['checked'],
+                    'cid': row['cid'],
+                    'sid': row['sid']
                 }
             cursor.execute(
                 """
@@ -631,8 +666,8 @@ class NeurodbSQLite:
             conn.rollback()
             conn.close()
     
-    def update_nodes(self, nids:list, creator:str=None, type:int=None, checked:int=None, status:int=None, cid:int=None, date:datetime=None):
-        if all(param is None for param in [creator, type, checked, status, cid]) or not nids:
+    def update_nodes(self, nids:list, creator:str=None, ntype:int=None, checked:int=None, status:int=None, cid:int=None, date:datetime=None):
+        if all(param is None for param in [creator, ntype, checked, status, cid]) or not nids:
             return
         if not isinstance(nids, list):
             nids = [nids]
@@ -650,11 +685,11 @@ class NeurodbSQLite:
                 where_conditions.append("(creator IS NULL OR creator != ?)")
                 update_params.append(creator)
                 condition_params.append(creator)
-            if type is not None:
+            if ntype is not None:
                 update_parts.append("type = ?")
                 where_conditions.append("(type IS NULL OR type != ?)")
-                update_params.append(type)
-                condition_params.append(type)
+                update_params.append(ntype)
+                condition_params.append(ntype)
             if checked is not None:
                 update_parts.append("checked = ?")
                 where_conditions.append("(checked IS NULL OR checked != ?)")

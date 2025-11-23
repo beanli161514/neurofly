@@ -4,10 +4,15 @@ import numpy as np
 class NeuroGraph():
     def __init__(self, nodes:dict=None, edges:dict=None):
         self.graph = nx.Graph()
-        self.nodes = self.graph.nodes
-        self.edges = self.graph.edges
-
         self.init_graph(nodes, edges)
+
+    @property
+    def nodes(self):
+        return self.graph.nodes
+    
+    @property
+    def edges(self):
+        return self.graph.nodes
 
     def init_graph(self, nodes:dict, edges:dict):
         self.graph.clear()
@@ -25,12 +30,13 @@ class NeuroGraph():
 
     def add_nodes(self, nodes:dict):
         for nid, data in nodes.items():
-            self.graph.add_node(nid, coord=data['coord'], type=data.get('type', 0))
+            data['type'] = data.get('type', 0)
+            self.graph.add_node(nid, **data)
     
     def add_edges(self, edges:dict):
         for (src, dst), data in edges.items():
             if src in self.graph and dst in self.graph:
-                self.graph.add_edge(src, dst)
+                self.graph.add_edge(src, dst, **data)
     
     def delete_nodes(self, nodes:dict):
         nids = list(nodes.keys())
