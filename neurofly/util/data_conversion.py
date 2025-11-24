@@ -68,7 +68,7 @@ def read_swc_folder(swc_folder:str) -> dict:
     swc_file_list = [_f for _f in os.listdir(swc_folder) if _f.endswith('.swc')]
     SWC_dict = {}
     for file_name in swc_file_list:
-        swc_path = os.path.join(swc_folder, swc_path)
+        swc_path = os.path.join(swc_folder, file_name)
         SWC = read_swc_file(swc_path=swc_path)
         SWC_dict[file_name] = SWC
     return SWC_dict
