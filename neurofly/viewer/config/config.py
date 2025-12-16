@@ -32,11 +32,13 @@ class NeuronSegmenterConfig:
         self.model_ckpt_path = config.get('model_ckpt_path', '')
 
 class NeuronReconstructorConfig:
+    use_tasks_table: bool
     global_task_query: str
     auto_contrast: bool
     DFS: bool
     def __init__(self, config:dict):
         self.cfg = config if config else {}
+        self.use_tasks_table = config.get('use_tasks_table', False)
         self.global_task_query = config.get('global_task_query', '')
         self.auto_contrast = config.get('auto_contrast', True)
         self.DFS = config.get('DFS', True)

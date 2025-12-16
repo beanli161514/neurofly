@@ -22,6 +22,7 @@ class NeurodbSQLite:
         self.init_index()
         self.init_spatial_index()
         self.init_action_table_with_index()
+        self.init_task_table_with_index()
         print("Database initialized successfully.")
 
     def init_table(self):
@@ -106,6 +107,32 @@ class NeurodbSQLite:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_actions_action_nid ON actions (action_nid)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_actions_type ON actions (type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_actions_creator ON actions (creator)")
+        conn.commit()
+        conn.close()
+
+    def init_task_table_with_index(self):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS tasks(
+                tid INTEGER PRIMARY KEY AUTOINCREMENT,
+                nid INTEGER,
+                x INTEGER,
+                y INTEGER,
+                z INTEGER,
+                sid INTEGER DEFAULT NULL,
+                checked INTEGER,
+                creator TEXT DEFAULT 'admin',
+                date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (nid) REFERENCES nodes(nid),
+                FOREIGN KEY (sid) REFERENCES segs(sid)
+            )
+            '''
+        )
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_nid ON tasks (nid)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_sid ON tasks (sid)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_checked ON tasks (checked)")
         conn.commit()
         conn.close()
     
@@ -193,8 +220,8 @@ class NeurodbSQLite:
             conn.commit()
             print("Spatial index created successfully.")
             return True
-        except Exception as e:
-            print(f"Error creating spatial index: {e}")
+        except Exception as E:
+            print(f"Error creating spatial index: {E}")
             conn.rollback()
             return False
         finally:
@@ -223,11 +250,12 @@ class NeurodbSQLite:
             )
             conn.commit()
             conn.close()
-        except Exception as e:
-            print(f"Error in add_segs: {e}")
+        except Exception as E:
+            print(f"Error in add_segs: {E}")
             conn.rollback()
+            raise E
+        finally:
             conn.close()
-            raise e
 
     def add_nodes(self, nodes:dict):
         # given a list of nodes, write them to node table
@@ -266,8 +294,9 @@ class NeurodbSQLite:
         except Exception as E:
             print(f"Error in add_nodes: {E}")
             conn.rollback()
-            conn.close()
             raise E
+        finally:
+            conn.close()
 
     def add_edges(self, edges:dict):
         # given list of edges, write them to edges table
@@ -296,8 +325,9 @@ class NeurodbSQLite:
         except Exception as E:
             print(f"Error in add_edges: {E}")
             conn.rollback()
-            conn.close()
             raise E
+        finally:
+            conn.close()
     
     def add_actions(self, actions:list):
         def __dictWithTupleKey2list__(_dict:dict):
@@ -340,8 +370,50 @@ class NeurodbSQLite:
         except Exception as E:
             print(f"Error in add_actions: {E}")
             conn.rollback()
-            conn.close()
             raise E
+        finally:
+            conn.close()
+    
+    def add_tasks(self, tasks:dict, mode='a'):
+        # tasks: {nid:{'nid', 'x', 'y', 'z', 'sid', 'checked', 'creator', 'date'}}
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            if mode == 'w':
+                cursor.execute("DELETE FROM tasks;")
+                conn.commit()
+            date = datetime.now()
+            entries = []
+            for nid, attr in tasks.items():
+                attr:dict
+                if 'coord' in attr:
+                    x, y, z = attr['coord']
+                elif 'x' in attr and 'y' in attr and 'z' in attr: 
+                    x, y, z = attr['x'], attr['y'], attr['z']
+                entries.append({
+                    'nid': attr['nid'],
+                    'x': x,
+                    'y': y,
+                    'z': z,
+                    'sid': attr.get('sid', None),
+                    'checked': attr.get('checked', -1),
+                    'creator': attr.get('creator', 'admin'),
+                    'date': attr.get('date', date)
+                })
+            cursor.executemany(
+                "INSERT INTO tasks " +
+                    "(nid, x, y, z, sid, checked, creator, date)" +
+                "VALUES (:nid, :x, :y, :z, :sid, :checked, :creator, :date)",
+                entries
+            )
+            conn.commit()
+            conn.close()
+        except Exception as E:
+            print(f"Error in add_tasks: {E}")
+            conn.rollback()
+            raise E
+        finally:
+            conn.close()
     
     def read_nodes(self, nids:list=None, ntype:int=None, checked:int=None, cid:int=None, sid:int=None):
         if nids is None and ntype is None and checked is None and cid is None and sid is None:
@@ -635,6 +707,26 @@ class NeurodbSQLite:
         conn.close()
         return actions
 
+    def read_tasks(self, query:str=None, tasks_table:bool=False):
+        if tasks_table:
+            query = "SELECT nid, x, y, z FROM tasks WHERE checked=-1"
+        if not query or query.strip() == '':
+            # query = "SELECT nid, x, y, z FROM nodes WHERE checked=-1"
+            return []
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        tasks = []
+        for i, row in enumerate(rows):
+            tasks.append({
+                'nid': row['nid'],
+                'coord': [row['x'], row['y'], row['z']],
+            })
+        conn.close()
+        return tasks
+
     def delete_nodes(self, nids):
         # given a list of nid, delete nodes from nodes table and edges from edges table
         conn = sqlite3.connect(self.db_path)
@@ -645,11 +737,12 @@ class NeurodbSQLite:
             cursor.execute(f"DELETE FROM edges WHERE src IN ({','.join(map(str, nids))}) OR dst IN ({','.join(map(str, nids))})")
             conn.commit()
             conn.close()
-        except Exception as e:
-            print(f"Error in delete_nodes: {e}")
+        except Exception as E:
+            print(f"Error in delete_nodes: {E}")
             conn.rollback()
+            raise E
+        finally:
             conn.close()
-            raise e
 
     def delete_edges(self, src_dst):
         conn = sqlite3.connect(self.db_path)
@@ -661,9 +754,11 @@ class NeurodbSQLite:
                 cursor.execute("DELETE FROM edges WHERE src=? AND dst=?", (src, dst))
             conn.commit()
             conn.close()
-        except Exception as e:
-            print(f"Error in delete_edges: {e}")
+        except Exception as E:
+            print(f"Error in delete_edges: {E}")
             conn.rollback()
+            raise E
+        finally:
             conn.close()
     
     def update_nodes(self, nids:list, creator:str=None, ntype:int=None, checked:int=None, status:int=None, cid:int=None, date:datetime=None):
@@ -726,12 +821,34 @@ class NeurodbSQLite:
             conn.commit()
             conn.close()
 
-        except Exception as e:
-            print(f"Error in update_nodes: {e}")
+        except Exception as E:
+            print(f"Error in update_nodes: {E}")
             conn.rollback()
+            raise E
+        finally:
             conn.close()
-            raise e
     
+    def update_tasks(self, nids:list, checked:int, date:datetime=None):
+        if not isinstance(nids, list):
+            nids = [nids]
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            placeholders = ",".join("?" for _ in nids)
+            query = f"""
+                UPDATE tasks
+                SET checked = ?, date = ?
+                WHERE nid IN ({placeholders})
+            """
+            cursor.execute(query, [checked, date, *nids])
+            conn.commit()
+        except Exception as E:
+            print(f"Error in update_tasks: {E}")
+            conn.rollback()
+            raise E
+        finally:
+            conn.close()
+
     def check_nodes(self, nids:list[int], date:datetime=None):
         self.update_nodes(nids, checked=1, date=date)
     
@@ -821,22 +938,4 @@ class NeurodbSQLite:
         print(f'Adding {len(nodes_entries)} nodes to database')
         self.add_edges(edges_entries)
         print(f'Adding {len(edges_entries)} edges to database')
-    
-    def read_tasks(self, query:str):
-        if not query or query.strip() == '':
-            # query = "SELECT nid, x, y, z FROM nodes WHERE checked=-1"
-            return []
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        tasks = []
-        for i, row in enumerate(rows):
-            tasks.append({
-                'nid': row['nid'],
-                'coord': [row['x'], row['y'], row['z']],
-            })
-        conn.close()
-        return tasks
     

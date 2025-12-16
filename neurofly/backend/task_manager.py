@@ -37,33 +37,16 @@ class TaskManager():
     def init_task(self):
         if self.DB:
             global_task_query = ''
+            use_tasks_table = False
             # use the global_task_query in config if available
             if self.config:
                 global_task_query = self.config.reconstructor_cfg.global_task_query
-            if global_task_query.endswith('.json') and os.path.exists(global_task_query):
-                tasks = self.read_task_from_json(global_task_query)
-                pprint.pprint(f'Loaded {len(tasks)} tasks from json file: {global_task_query}')
-            else:
-                tasks = self.DB.read_tasks(global_task_query)
-                pprint.pprint(f'Loaded {len(tasks)} tasks from db with query: {global_task_query}')
+                use_tasks_table = self.config.reconstructor_cfg.use_tasks_table
+            tasks = self.DB.read_tasks(global_task_query, use_tasks_table)
+            pprint.pprint(f'Loaded {len(tasks)} tasks from DB')
         else:
             tasks = []
         self.TASKS = Tasks(tasks)
-
-    def read_task_from_json(self, json_path:str):
-        with open(json_path, 'r') as f:
-            data = json.load(f)
-            candidate_tasks = data['tasks']
-        candidate_task_nids = [task['nid'] for task in candidate_tasks]
-        valid_nodes = self.DB.read_nodes(candidate_task_nids)
-        tasks = []
-        for nid, node in valid_nodes.items():
-            tasks.append({
-                'nid': nid,
-                'coord': node['coord'],
-                'checked': node['checked'],
-            })
-        return tasks
     
     def reset_task_status(self):
         self.TASKS.reset_idx()
@@ -266,6 +249,7 @@ class TaskManager():
                 action.action_node.update({'checked': 1})
                 action_node = action.action_node
                 self.DB.update_nodes([action_node['nid']], creator=action_node['creator'], ntype=action_node['type'], checked=1)
+                self.DB.update_tasks([action_node['nid']], checked=1)
                 self.finish_task(action_node['nid'])
             
             elif action.action_type == 'deconv':

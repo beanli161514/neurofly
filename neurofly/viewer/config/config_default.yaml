@@ -10,6 +10,7 @@ NeuronSegmenter:
   model_ckpt_path: ''
 
 NeuronReconstructor:
+  use_tasks_table: false
   global_task_query: |
     WITH relevant_cid AS (
         SELECT DISTINCT cid
