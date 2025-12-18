@@ -59,16 +59,20 @@ class MPCN:
         state_dict = nn.state.torch_load(ckpt_path)
         state_dict = {k.replace('module.',''):v for k,v in state_dict.items()}
         for k, v in state_dict.items():
-            if 'ups' in k:
-                k = k.split('.')
-                if len(k) == 4:
-                    k.pop(2)
-                k = '.'.join(k)
-            obj = get_child(self, k)
-            if obj.shape == v.shape:
-                obj.assign(v.numpy())
-            else:
-                pass
+            try:
+                if 'ups' in k:
+                    k = k.split('.')
+                    if len(k) == 4:
+                        k.pop(2)
+                    k = '.'.join(k)
+                obj = get_child(self, k)
+                if obj.shape == v.shape:
+                    obj.assign(v.numpy())
+                else:
+                    pass
+            except Exception as E:
+                print(f"Failed to load {k}: {E}")
+                continue
 
 
 class Deconver():

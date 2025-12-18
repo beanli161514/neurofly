@@ -70,11 +70,15 @@ class UNet3D:
         state_dict = nn.state.torch_load(ckpt_path)
         state_dict = {k.replace('module.',''):v for k,v in state_dict.items()}
         for k, v in state_dict.items():
-            obj = get_child(self, k)
-            if obj.shape == v.shape:
-                obj.assign(v.numpy())
-            else:
-                pass
+            try:
+                obj = get_child(self, k)
+                if obj.shape == v.shape:
+                    obj.assign(v.numpy())
+                else:
+                    pass
+            except Exception as E:
+                print(f"Failed to load {k}: {E}")
+                continue
 
 class SegNet():
     def __init__(self,ckpt_path:str,bg_thres=150):
