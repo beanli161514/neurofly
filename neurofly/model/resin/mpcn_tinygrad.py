@@ -1,4 +1,3 @@
-import torch
 import os
 import numpy as np
 from tinygrad import nn
@@ -57,12 +56,8 @@ class MPCN:
 
 
     def load_from_pretrained(self,ckpt_path):
-        state_dict = torch.load(ckpt_path,map_location='cpu')
-        if 'model' in state_dict.keys():
-            state_dict = state_dict['model']
-            torch.save(state_dict, ckpt_path)
+        state_dict = nn.state.torch_load(ckpt_path)
         state_dict = {k.replace('module.',''):v for k,v in state_dict.items()}
-
         for k, v in state_dict.items():
             if 'ups' in k:
                 k = k.split('.')

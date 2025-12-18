@@ -1,7 +1,7 @@
 NeuronViewer:
   auto_contrast: true
   ROISelector:
-    max_size: 512
+    max_size: 1024
     default_center: [64, 64, 64]
     default_size: [64, 64, 64]
     power_step: 32
