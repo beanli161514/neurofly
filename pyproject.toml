@@ -44,6 +44,7 @@ include = ["neurofly", "neurofly.*"]
 [tool.setuptools.package-data]
 "neurofly" = [
     "napari.yaml",
+    "**/*.yaml",
     "**/*.pth"
 ]
 
