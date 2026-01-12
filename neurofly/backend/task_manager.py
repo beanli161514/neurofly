@@ -1,6 +1,5 @@
-import os
-import json
 import pprint
+from tqdm import tqdm
 
 from neurofly.backend.action import Action
 from neurofly.backend.neuron_graph import NeuroGraph
@@ -25,10 +24,18 @@ class TaskManager():
         nodes, edges = self.DB.read_nodes_edges_within_roi(roi)
         self.G.init_graph(nodes, edges)
     
-    def init_graph_prof(self):
-        if self.task_node is not None:
-            nodes, edges = self.DB.read_connected_components(self.task_node['nid'], with_edges=True)
-            self.G_prof.init_graph(nodes, edges)
+    def init_graph_prof(self, roi=None):
+        if roi is not None:
+            soma_nodes, _ = self.DB.read_nodes_edges_within_roi(roi=roi, ntype=1)
+            NODES, EDGES = {}, {}
+            for _soma_nid in tqdm(soma_nodes.keys(), total=len(soma_nodes), desc='Loading CC with Soma in Panoramic Mode'):
+                nodes, edges = self.DB.read_connected_components(_soma_nid, with_edges=True)
+                NODES.update(nodes)
+                EDGES.update(edges)
+        else:
+            if self.task_node is not None:
+                NODES, EDGES = self.DB.read_connected_components(self.task_node['nid'], with_edges=True)
+        self.G_prof.init_graph(NODES, EDGES)
 
     def init_db_status(self):
         self.MAX_NID = self.DB.get_max_nid()

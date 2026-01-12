@@ -21,7 +21,7 @@ class NeuronReconstructor(NeuronViewer):
 
         # viewer
         self.viewer.__dict__['neurofly']['reconstructor'] = self
-        self.nodes_layer = self.viewer.add_points(ndim=3, size=1, shading='spherical', name='nodes')
+        self.nodes_layer = self.viewer.add_points(ndim=3, size=1, shading='spherical', blending='translucent_no_depth', name='nodes')
         self.edges_layer = self.viewer.add_vectors(ndim=3, vector_style='line', edge_color='orange', edge_width=0.3, name='edges')
         self.viewer.layers.selection.active = self.image_layer
 
@@ -138,24 +138,38 @@ class NeuronReconstructor(NeuronViewer):
     
     def render(self, *, init_graph:bool):
         # clear layers
-        if self.resolution_level != 0 or self.TaskManager is None:
+        if self.TaskManager is None:
             self.nodes_layer.data = np.zeros((0, 3))
             self.edges_layer.data = np.empty((0, 2, 3))
             return
         
-        # logic: update graph in TaskManager
-        if init_graph:
-            center, size = self.ROISelector.get_roi()
-            roi = [center[i]-size[i]//2 for i in range(3)] + size
-            self.TaskManager.init_graph(roi)
-        
-        # visual: update layers
         self.task_node = self.TaskManager.task_node if self.TaskManager.task_node else None
-        if self.RecWidgets.get_proofreading_mode():
-            self.TaskManager.init_graph_prof()
-            nodes_coords, nodes_properties, edges_coords, edges_properties = self.TaskManager.G_prof.get_render_data(self.task_node)
+        scale = 2**self.resolution_level
+        if self.resolution_level > 0:
+            if self.RecWidgets.get_proofreading_mode():
+                center, size = self.ROISelector.get_roi()
+                center_shift = [int(i*scale) for i in center]
+                size_shift = [int(i*scale) for i in size]
+                roi_shift = [center_shift[i]-size_shift[i]//2 for i in range(3)] + size_shift
+                self.TaskManager.init_graph_prof(roi_shift)
+                nodes_coords, nodes_properties, edges_coords, edges_properties = self.TaskManager.G_prof.get_render_data(self.task_node)
+            else:
+                self.nodes_layer.data = np.zeros((0, 3))
+                self.edges_layer.data = np.empty((0, 2, 3))
+                return
         else:
-            nodes_coords, nodes_properties, edges_coords, edges_properties = self.TaskManager.G.get_render_data(self.task_node)
+            if init_graph:
+                center, size = self.ROISelector.get_roi()
+                roi = [center[i]-size[i]//2 for i in range(3)] + size
+                self.TaskManager.init_graph(roi)
+            if self.task_node is None: 
+                self.RecWidgets.set_proofreading_mode(False)
+            if self.RecWidgets.get_proofreading_mode():
+                self.TaskManager.init_graph_prof()
+                nodes_coords, nodes_properties, edges_coords, edges_properties = self.TaskManager.G_prof.get_render_data(self.task_node)
+            else:
+                nodes_coords, nodes_properties, edges_coords, edges_properties = self.TaskManager.G.get_render_data(self.task_node)
+
         self.nodes_layer.data = nodes_coords
         self.nodes_layer.properties = {
             'nids': nodes_properties['nids'], 
@@ -163,9 +177,11 @@ class NeuronReconstructor(NeuronViewer):
         self.nodes_layer.size = nodes_properties['sizes']
         if len(nodes_properties['colors']) > 0:
             self.nodes_layer.face_color = nodes_properties['colors']
+        self.nodes_layer.scale = [1/scale, 1/scale, 1/scale]
 
         self.edges_layer.data = edges_coords
         self.edges_layer.properties = edges_properties
+        self.edges_layer.scale = [1/scale, 1/scale, 1/scale]
 
         # control: update widgets
         self.RecWidgets.set_node_type_idx(self.task_node['type'] if self.task_node else 0)
@@ -174,7 +190,8 @@ class NeuronReconstructor(NeuronViewer):
         nodes_coords = self.nodes_layer.data
         if len(nodes_coords) > 0:
             # nodes layer is not empty, calculate mean and std intensity
-            nodes_coords = nodes_coords - self.image_layer.translate
+            scale = 2**self.resolution_level
+            nodes_coords = nodes_coords//scale - self.image_layer.translate
             valid_idx = (np.all((nodes_coords >= 0) & (nodes_coords < self.image_layer.data.shape), axis=1))
             nodes_coords = nodes_coords[valid_idx].astype(np.int16)
             intensities:np.ndarray = self.image_layer.data[tuple(nodes_coords.T)]
@@ -186,8 +203,12 @@ class NeuronReconstructor(NeuronViewer):
             super().update_contrast()
 
     def proofread(self):
-        if self.TaskManager is None or self.task_node is None:
-            napari.utils.notifications.show_info("Please load a database and select a task node first.")
+        if self.TaskManager is None:
+            napari.utils.notifications.show_info("Please load a database first.")
+            self.RecWidgets.set_proofreading_mode(False)
+            return
+        if self.resolution_level == 0 and self.task_node is None:
+            napari.utils.notifications.show_info("Please load a task node first.")
             self.RecWidgets.set_proofreading_mode(False)
             return
         self.render(init_graph=False)

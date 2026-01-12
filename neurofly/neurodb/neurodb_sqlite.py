@@ -415,6 +415,39 @@ class NeurodbSQLite:
         finally:
             conn.close()
     
+    def read_segs(self, sids:list=None):
+        if sids is None:
+            return {}
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        where_parts = []
+        params = []
+        # sids
+        if isinstance(sids, str) and sids == "*":
+            pass
+        elif isinstance(sids, (list, tuple)):
+            placeholders = ",".join("?" for _ in sids)
+            where_parts.append(f"nid IN ({placeholders})")
+        where_clause = ""
+        if where_parts:
+            where_clause = "WHERE " + " AND ".join(where_parts)
+        query = f"SELECT * FROM segs {where_clause}"
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        segs = {}
+        for row in rows:
+            sid = row["sid"]
+            segs[sid] = {
+                "sid": sid,
+                "points": eval(row['points']),
+                "version": row["version"],
+                "date": row["date"],
+            }
+        conn.close()
+        return segs
+
     def read_nodes(self, nids:list=None, ntype:int=None, checked:int=None, cid:int=None, sid:int=None):
         if nids is None and ntype is None and checked is None and cid is None and sid is None:
             return {}
@@ -538,7 +571,7 @@ class NeurodbSQLite:
         conn.close()
         return edge
 
-    def read_nodes_edges_within_roi(self, roi, rtree:bool=True):
+    def read_nodes_edges_within_roi(self, roi, rtree:bool=True, *, ntype=None):
         offset, size = roi[:3], roi[-3:]
         x_min, x_max = offset[0], offset[0]+size[0]-1
         y_min, y_max = offset[1], offset[1]+size[1]-1
@@ -558,6 +591,11 @@ class NeurodbSQLite:
                 AND r.minY >= ? AND r.minY <= ?
                 AND r.minZ >= ? AND r.minZ <= ?
             '''
+            parameters = (x_min, x_max, y_min, y_max, z_min, z_max)
+            if ntype is not None:
+                query += "\n AND n.type = ?"
+                parameters = (x_min, x_max, y_min, y_max, z_min, z_max, ntype)
+            
         else:
             # Fallback to standard range query
             query = '''
@@ -566,7 +604,11 @@ class NeurodbSQLite:
                 AND y BETWEEN ? AND ?
                 AND z BETWEEN ? AND ?
             '''
-        cursor.execute(query, (x_min, x_max, y_min, y_max, z_min, z_max))
+            parameters = (x_min, x_max, y_min, y_max, z_min, z_max)
+            if ntype is not None:
+                query += "\n AND n.type = ?"
+                parameters = (x_min, x_max, y_min, y_max, z_min, z_max, ntype)
+        cursor.execute(query, parameters)
         nodes = {}
         for row in cursor.fetchall():
             nodes[row['nid']] = {
