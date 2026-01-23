@@ -585,7 +585,7 @@ class NeurodbSQLite:
         rtree_exists = cursor.fetchone() is not None
         if rtree and rtree_exists:
             query = '''
-                SELECT n.nid, n.x, n.y, n.z, n.type, n.checked
+                SELECT n.*
                 FROM nodes n JOIN nodes_rtree r ON n.nid = r.id
                 WHERE r.minX >= ? AND r.minX <= ?
                 AND r.minY >= ? AND r.minY <= ?
@@ -597,9 +597,8 @@ class NeurodbSQLite:
                 parameters = (x_min, x_max, y_min, y_max, z_min, z_max, ntype)
             
         else:
-            # Fallback to standard range query
             query = '''
-                SELECT nid, x, y, z, type, checked FROM nodes
+                SELECT * FROM nodes
                 WHERE x BETWEEN ? AND ?
                 AND y BETWEEN ? AND ?
                 AND z BETWEEN ? AND ?
@@ -612,10 +611,15 @@ class NeurodbSQLite:
         nodes = {}
         for row in cursor.fetchall():
             nodes[row['nid']] = {
-                'nid': row['nid'],
-                'coord': [row['x'], row['y'], row['z']],
-                'type': row['type'],
-                'checked': row['checked']
+                "nid": row['nid'],
+                "coord": [row["x"], row["y"], row["z"]],
+                "creator": row["creator"],
+                "type": row["type"],
+                "checked": row["checked"],
+                "status": row["status"],
+                "sid": row["sid"],
+                "cid": row["cid"],
+                "date": row["date"],
             }
 
         nids = list(nodes.keys())
