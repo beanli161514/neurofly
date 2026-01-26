@@ -23,7 +23,7 @@ class NeurodbSQLite:
         self.init_spatial_index()
         self.init_action_table_with_index()
         self.init_task_table_with_index()
-        print("Database initialized successfully.")
+        # print("Database initialized successfully.")
 
     def init_table(self):
         conn = sqlite3.connect(self.db_path)
@@ -623,12 +623,16 @@ class NeurodbSQLite:
             }
 
         nids = list(nodes.keys())
-        query = f"SELECT src, dst FROM edges WHERE src IN ({','.join(map(str, nids))}) OR dst IN ({','.join(map(str, nids))})"
+        query = f"SELECT * FROM edges WHERE src IN ({','.join(map(str, nids))}) OR dst IN ({','.join(map(str, nids))})"
         cursor.execute(query)
         edges = {}
         for row in cursor.fetchall():
-            edges[(row['src'], row['dst'])] = {}
-            
+            src, dst = row['src'], row['dst']
+            if src in nodes and dst in nodes:
+                edges[(src, dst)] = {
+                    'creator': row['creator'],
+                    'date': row['date']
+                }
         conn.close()
         return nodes, edges
     
