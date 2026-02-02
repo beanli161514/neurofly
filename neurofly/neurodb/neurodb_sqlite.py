@@ -2,6 +2,7 @@ import sqlite3
 import json
 from datetime import datetime
 
+# todo: in version 3.50.2 of sqlite, the max variable number is 250000. chunked query needed.
 class NeurodbSQLite:
     def __init__(self, db_path):
         if db_path is not None:
@@ -429,7 +430,8 @@ class NeurodbSQLite:
             pass
         elif isinstance(sids, (list, tuple)):
             placeholders = ",".join("?" for _ in sids)
-            where_parts.append(f"nid IN ({placeholders})")
+            where_parts.append(f"sid IN ({placeholders})")
+            params.extend(sids)
         where_clause = ""
         if where_parts:
             where_clause = "WHERE " + " AND ".join(where_parts)
@@ -527,14 +529,18 @@ class NeurodbSQLite:
         conn.close()
         return node
     
-    def read_edges_by_nids(self, nids:list):
+    def read_edges(self, nids:list):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        placeholders = ','.join('?' for _ in nids)
-        query = f"SELECT * FROM edges WHERE src IN ({placeholders}) OR dst IN ({placeholders})"
-        cursor.execute(query, nids + nids)
+        if isinstance(nids, str) and nids == "*":
+            query = f"SELECT * FROM edges"
+            cursor.execute(query)
+        else:
+            placeholders = ','.join('?' for _ in nids)
+            query = f"SELECT * FROM edges WHERE src IN ({placeholders}) OR dst IN ({placeholders})"
+            cursor.execute(query, nids + nids)
         
         edges = {}
         for row in cursor.fetchall():

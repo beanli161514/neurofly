@@ -124,7 +124,7 @@ class TaskManager():
             elif action.action_type == 'delete_node':
                 history = {
                     'nodes': {action.action_node['nid']: action.action_node},
-                    'edges': self.DB.read_edges_by_nids([action.action_node['nid']])
+                    'edges': self.DB.read_edges([action.action_node['nid']])
                 }
                 # record history for the action
                 action.record_history(history)

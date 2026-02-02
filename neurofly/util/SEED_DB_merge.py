@@ -53,7 +53,7 @@ def DBSliced_to_DBMerged(DB_Merged:NeurodbSQLite, DB_Sliced:NeurodbSQLite, ROI:l
     max_nid = DB_Merged.get_max_nid()
     if ROI is None:
         NODES = DB_Sliced.read_nodes(nids='*')
-        EDGES = DB_Sliced.read_edges_by_nids(nids=list(NODES.keys()))
+        EDGES = DB_Sliced.read_edges(nids=list(NODES.keys()))
     else:
         NODES, EDGES = DB_Sliced.read_nodes_edges_within_roi(roi=ROI)
     NODES_shift, nid_shift_map = shift_NODES(NODES, offset=max_nid, sid_shift_map=sid_shift_map)
