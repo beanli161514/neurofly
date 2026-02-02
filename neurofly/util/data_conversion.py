@@ -1,5 +1,6 @@
 import os
 from tqdm import tqdm
+import networkx as nx
 
 from neurofly.neurodb.neurodb_sqlite import NeurodbSQLite
 from neurofly.backend.neuron_graph import NeuroGraph
@@ -22,11 +23,12 @@ def graph2swc(G:NeuroGraph, mode:str='normal'):
     elif mode == 'forced':
         skip_error = True
 
-    graph = G.graph
+    graph:nx.Graph = G.graph if isinstance(G, NeuroGraph) else G
     somas = [_nid for _nid, _node_attr in graph.nodes(data=True) if _node_attr.get('type') == 1]
     if not somas:
         flag = 'error'
         logger = "No soma node in the connected component."
+        somas = list(set(graph.nodes))[0:1]
         if skip_error:
             return [], flag, logger
     elif len(somas) > 1:
