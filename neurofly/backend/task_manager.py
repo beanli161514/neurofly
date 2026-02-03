@@ -240,8 +240,9 @@ class TaskManager():
                 # the nodes to be deleted is the action node
                 # action node and its edges are also recorded in the action.history
                 deleted_nids = [action.action_node['nid']]
-                self.DB.delete_nodes(deleted_nids)
                 self.TASKS.remove_task(deleted_nids[0])
+                self.DB.delete_nodes(deleted_nids)
+                self.DB.update_tasks(deleted_nids, checked=1)
 
                 deleted_SrcDst = action.history['edges'].keys()
                 self.DB.delete_edges(deleted_SrcDst)
