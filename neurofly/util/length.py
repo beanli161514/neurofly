@@ -59,10 +59,10 @@ def cal_length_from_graph(G:nx.Graph):
     
     return length_total
 
-def cal_length_from_swc_interp(SWC:list, *, return_log:bool=False):
+def cal_length_from_swc_interp(SWC:list, *, angle_threshold:float=90, return_log:bool=False):
     NODES = parse_swc(SWC)
     G = nx.Graph()
-    ANGLE_THRESHOLD = 90
+    ANGLE_THRESHOLD = angle_threshold
     logger = []
     for nid, node in tqdm(NODES.items(), total=len(NODES), desc="Removing invalid edges for length calculation"):
         n_coord = np.asarray(node['coord'])

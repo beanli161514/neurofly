@@ -10,6 +10,7 @@ from neurofly.neurodb.neurodb_sqlite import NeurodbSQLite
 from neurofly.backend.neuron_graph import NeuroGraph
 from neurofly.neurodb.image_reader import Ims
 
+
 def shift_SEGS(SEGS:dict, offset:int):
     SEGS_shift = {}
     sid_shift_map = {}
@@ -83,7 +84,7 @@ def Merge_Main(img_path:str, db_merged_path:str, db_sliced_dir:str):
         DB_Sliced = NeurodbSQLite(db_sliced_path)
         DBSliced_to_DBMerged(DB_Merged, DB_Sliced, roi)
 
-def cnnt_landmark(img_path:str, db_merged_path:str):
+def match_landmark(img_path:str, db_merged_path:str):
     IMG = Ims(img_path)
     DB = NeurodbSQLite(db_merged_path)
     def __get_G_with_RTree__(_NODES:dict, _EDGES:dict):
@@ -139,21 +140,27 @@ def cnnt_landmark(img_path:str, db_merged_path:str):
         # [start_x, start_y, start_z] + [end_x, end_y, end_z]
         _post_merge_roi = [0,0,_z] + [X,Y,_z+Z_RANGE]
         ROIs.append([_fuse_roi, _pre_merge_roi, _post_merge_roi])
-    TASK_NIDS = []
+    LANDMARK_NIDS = []
+    EDGES_MATCHED = []
     for _fuse_roi, _pre_merge_roi, _post_merge_roi in tqdm(ROIs):
         _NODES, _EDGES = DB.read_nodes_edges_within_roi(_fuse_roi)
         _G, _RTree = __get_G_with_RTree__(_NODES, _EDGES)
         _pre_end_nids = [_nid for _nid in list(_RTree.intersection(_pre_merge_roi, objects=False)) if _G.degree[_nid]==1]
         _post_end_nids = [_nid for _nid in list(_RTree.intersection(_post_merge_roi, objects=False)) if _G.degree[_nid]==1]
-        _EDGES_matched = __match__(_pre_end_nids, _post_end_nids, _G)
+        _edges_matched = __match__(_pre_end_nids, _post_end_nids, _G)
         # print(f'=== {len(_EDGES_matched)} ===')
-        for (_src, _dst), _attr in _EDGES_matched.items():
-            TASK_NIDS.append(_src)
-            TASK_NIDS.append(_dst)
+        for (_src, _dst), _attr in _edges_matched.items():
+            LANDMARK_NIDS.append(_src)
+            LANDMARK_NIDS.append(_dst)
             # print(f'{_attr['dist']:.4f}')
-        DB.add_edges(_EDGES_matched)
-    TASK_NIDS = list(dict.fromkeys(TASK_NIDS))
-    return TASK_NIDS
+        EDGES_MATCHED.append(_edges_matched)
+    LANDMARK_NIDS = list(dict.fromkeys(LANDMARK_NIDS))
+    return LANDMARK_NIDS, EDGES_MATCHED
+
+def cnnt_landmark(db_merged_path:str, edges_matched:list):
+    DB = NeurodbSQLite(db_merged_path)
+    for _edges in tqdm(edges_matched, desc='Connecting Landmarks'):
+        DB.add_edges(_edges)
 
 def reset_tasks(db_merged_path:str, append_task_nids:list=[]):
     DB_Merged = NeurodbSQLite(db_merged_path)
