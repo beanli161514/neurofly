@@ -547,7 +547,7 @@ class NeuronReconstructor(NeuronViewer):
             self.RecWidgets.set_check_button_status('Check')
             return
         self.task_node = self.TaskManager.task_node
-        action_node = self.task_node
+        action_node = self.task_node.copy()
         action_node.update({
             'creator': self.RecWidgets.get_username(),
             'type': self.RecWidgets.get_node_type_idx(),
@@ -561,7 +561,6 @@ class NeuronReconstructor(NeuronViewer):
         self.TaskManager.submit()
         self.next_task()
         self.RecWidgets.set_check_button_status('Check')
-        self.RecWidgets.set_node_type_idx(0)
 
 
 def main():

@@ -889,6 +889,8 @@ class NeurodbSQLite:
             nids = [nids]
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        if date is None:
+            date = datetime.now()
         try:
             placeholders = ",".join("?" for _ in nids)
             query = f"""
