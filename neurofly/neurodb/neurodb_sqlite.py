@@ -724,7 +724,7 @@ class NeurodbSQLite:
         conn.close()
         return nodes
     
-    def read_actions(self, nids:list=None):
+    def read_actions(self, task_nids:list=None):
         def __parser_history__(_pickle:str):
             _history = json.loads(_pickle)
             _edges_list = _history['edges']
@@ -736,9 +736,9 @@ class NeurodbSQLite:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        if nids:
-            query = f"SELECT * FROM actions WHERE nid IN ({','.join('?' for _ in nids)}) ORDER BY aid ASC;"
-            cursor.execute(query, nids)
+        if task_nids:
+            query = f"SELECT * FROM actions WHERE task_nid IN ({','.join('?' for _ in task_nids)}) ORDER BY aid ASC;"
+            cursor.execute(query, task_nids)
         else:
             query = "SELECT * FROM actions ORDER BY aid ASC;"
             cursor.execute(query)
