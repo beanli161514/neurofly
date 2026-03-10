@@ -17,3 +17,5 @@ test/
 .eggs
 .pytest_cache
 .coverage
+
+.agents/
