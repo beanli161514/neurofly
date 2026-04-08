@@ -87,7 +87,15 @@ class NeuronReconstructor(NeuronViewer):
         auto_cnnt2nbrs_shortcut_fn = lambda _self, _event=None: self.viewer_auto_connect_nearest(2)
         self.viewer.bind_key('q', auto_cnnt1nbr_shortcut_fn, overwrite=True)
         self.viewer.bind_key('w', auto_cnnt2nbrs_shortcut_fn, overwrite=True)
-    
+        # ambiguous node type
+        self.viewer.bind_key(
+            'a',
+            lambda _self, _event=None:
+                self.RecWidgets.set_node_type_idx(7) if self.RecWidgets.get_node_type_idx()!=7 else self.RecWidgets.set_node_type_idx(0),
+            overwrite=True,
+        )
+
+
     def on_db_loading(self):
         db_path = self.RecWidgets.get_database_path()
         self.TaskManager = TaskManager(db_path, config=self.config)
