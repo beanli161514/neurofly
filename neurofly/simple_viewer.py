@@ -2,6 +2,7 @@ import numpy as np
 import napari
 import os
 from magicgui import magicgui, widgets
+from napari.utils.notifications import show_info
 from neurofly.image_reader import wrap_image
 from tifffile import imwrite
 
@@ -245,6 +246,11 @@ class SimpleViewer(widgets.Container):
             event.view_direction,
             event.dims_displayed
         )
+        if near_point is None or far_point is None:
+            # the click ray does not pass through the image volume
+            # (e.g. clicking outside the block in 3D view)
+            show_info("double click is outside the image volume")
+            return
         sample_ray = far_point - near_point
         length_sample_vector = np.linalg.norm(sample_ray)
         increment_vector = sample_ray / (2 * length_sample_vector)

@@ -1198,6 +1198,11 @@ class Annotator(widgets.Container):
                 event.view_direction,
                 event.dims_displayed
             )
+            if near_point is None or far_point is None:
+                # the click ray does not pass through the image volume
+                # (e.g. clicking outside the block in 3D view)
+                show_info("click is outside the image volume")
+                return
             sample_ray = far_point - near_point
             length_sample_vector = np.linalg.norm(sample_ray)
             increment_vector = sample_ray / (2 * length_sample_vector)
