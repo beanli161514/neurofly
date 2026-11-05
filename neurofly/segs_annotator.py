@@ -691,8 +691,20 @@ class Annotator(widgets.Container):
             self.image_layer.data = image
             self.image_layer.reset_contrast_limits()
             self.image_layer.contrast_limits = [min(mean_value//2,200),mean_value+std_value]
-            self.image_layer.translate = translate
-            self.viewer.camera.center = c_coord
+            # anisotropic datasets: use per-axis physical spacing (µm/voxel) for the
+            # layer scale so the view keeps true proportions; node/edge layers carry
+            # level-voxel absolute coordinates and follow the same spacing with
+            # zero translate. The block origin is kept in voxels for put_point.
+            spacing = self.image.info[self.image.resolution_levels.index(resolution_level)]['spacing']
+            self._image_origin = translate
+            self.image_layer.scale = spacing
+            self.image_layer.translate = [i*j for i,j in zip(translate,spacing)]
+            for attr in ('point_layer','edge_layer','ex_edge_layer'):
+                coord_layer = getattr(self, attr, None)
+                if coord_layer is not None:
+                    coord_layer.scale = spacing
+                    coord_layer.translate = [0.0,0.0,0.0]
+            self.viewer.camera.center = [i*j for i,j in zip(c_coord,spacing)]
 
 
         self.node_type_dropdown.changed.disconnect(self.on_changing_type)
@@ -850,26 +862,26 @@ class Annotator(widgets.Container):
                 if (np.array(roi[3:])<np.array([1000,1000,1000])).all():
                     level = i
                     break
-            # calculate scale
+            # per-axis physical spacing (µm/voxel) instead of size ratios,
+            # so anisotropic datasets keep true proportions (resolves the TODO below)
             resolution_level = self.image.resolution_levels.index(str(self.level.value))
-            hr_image_size = self.image.info[resolution_level]['image_size']
-            lr_image_size = self.image.info[level]['image_size']
-            scale = [i/j for i,j in zip(hr_image_size,lr_image_size)]
+            spacing = self.image.info[resolution_level]['spacing']
+            pano_spacing = self.image.info[level]['spacing']
 
             image = self.image.from_roi(roi, level=level, channel=str(self.channel.value))
             origin = self.image.info[resolution_level]['origin']
             self.panorama_image.data = image
-            # TODO: for anisotropic image
-            self.panorama_image.scale = scale
-            self.panorama_image.translate = origin
+            self.panorama_image.scale = pano_spacing
+            self.panorama_image.translate = [i*j for i,j in zip(origin,spacing)]
             self.panorama_image.visible = True
             self.panorama_image.reset_contrast_limits()
             self.panorama_image.metadata['loaded'] = True
         
         # load full image if it's tiff format
-        if '.tif' in str(self.image_path.value) and self.image_switch.value == True: 
-            image = self.image.from_roi(self.image.roi) 
+        if '.tif' in str(self.image_path.value) and self.image_switch.value == True:
+            image = self.image.from_roi(self.image.roi)
             self.panorama_image.data = image
+            self.panorama_image.scale = self.image.info[0]['spacing']
             self.panorama_image.visible = True
             self.panorama_image.reset_contrast_limits()
 
@@ -926,7 +938,8 @@ class Annotator(widgets.Container):
         }
         
         resolution_level = self.image.resolution_levels.index(str(self.level.value))
-        camera_center  = [i + j//2 for i,j in zip(self.image.rois[resolution_level][0:3],self.image.rois[resolution_level][3:])]
+        spacing = self.image.info[resolution_level]['spacing']
+        camera_center  = [(i + j//2)*s for i,j,s in zip(self.image.rois[resolution_level][0:3],self.image.rois[resolution_level][3:],spacing)]
 
         self.panorama_points.visible = True
         self.panorama_points.data = np.array(coords)
@@ -935,6 +948,13 @@ class Annotator(widgets.Container):
         self.panorama_points.face_color = 'colors'
         self.panorama_points.size = sizes
         self.panorama_points.selected_data = []
+
+        # panorama point/view layers carry hr-level absolute voxel coordinates
+        for attr in ('panorama_points','panorama_view'):
+            coord_layer = getattr(self, attr, None)
+            if coord_layer is not None:
+                coord_layer.scale = spacing
+                coord_layer.translate = [0.0,0.0,0.0]
 
 
         if self.image_switch.value == True:
@@ -1222,7 +1242,7 @@ class Annotator(widgets.Container):
                 values.append(value)
             max_point_index = values.index(max(values))
             max_point = sample_points[max_point_index]
-            max_point = [i+int(j) for i,j in zip(max_point,self.image_layer.translate)]
+            max_point = [i+int(j) for i,j in zip(max_point,getattr(self,'_image_origin',[0,0,0]))]
 
             # get new node id
             new_id = len(self.G)
