@@ -700,6 +700,19 @@ class Annotator(widgets.Container):
         if keep_image == False:
             self._crop_block(c_coord, coords)
 
+        self.node_type_dropdown.changed.disconnect(self.on_changing_type)
+        self.node_type_dropdown.value = self.node_types[self.G.nodes[selection]['type']]
+        self.node_type_dropdown.changed.connect(self.on_changing_type)
+
+        self.point_layer.data = np.array(coords)
+        self.point_layer.properties = properties
+        self.point_layer.face_colormap = 'hsl'
+        self.point_layer.face_color = 'colors'
+        self.point_layer.size = sizes
+        self.point_layer.selected_data = []
+        self.ex_edge_layer.data = np.array(edges)
+        self.viewer.layers.selection.active = self.point_layer
+
 
     def _crop_block(self, c_coord, coords):
         """Load the 64..1024³ block around c_coord and sync every coordinate
@@ -778,8 +791,8 @@ class Annotator(widgets.Container):
         pano = self.panorama_image
         if self.image is None or pano is None or pano.data is None or not self.slice_enabled.value:
             if pano is not None:
+                # plane 仅在 depiction='plane' 下渲染，回 volume 即关闭
                 pano.depiction = 'volume'
-                pano.plane.enabled = False
             if getattr(self, 'slice_nodes', None) is not None:
                 self.slice_nodes.visible = False
             return
@@ -793,7 +806,6 @@ class Annotator(widgets.Container):
         pano.plane.position = position
         pano.plane.normal = normal
         pano.plane.thickness = thickness
-        pano.plane.enabled = True
 
         # db nodes inside the slab: hr-level voxel coords (xyz) -> world (µm)
         # -> panorama data coords -> signed distance to the plane
@@ -815,21 +827,6 @@ class Annotator(widgets.Container):
         sl.scale = hr_spacing
         sl.translate = [0.0, 0.0, 0.0]
         sl.data = np.asarray(pts)[inside]
-
-
-        self.node_type_dropdown.changed.disconnect(self.on_changing_type)
-        self.node_type_dropdown.value = self.node_types[self.G.nodes[selection]['type']]
-        self.node_type_dropdown.changed.connect(self.on_changing_type)
-
-
-        self.point_layer.data = np.array(coords)
-        self.point_layer.properties = properties
-        self.point_layer.face_colormap = 'hsl'
-        self.point_layer.face_color = 'colors'
-        self.point_layer.size = sizes
-        self.point_layer.selected_data = []
-        self.ex_edge_layer.data = np.array(edges)
-        self.viewer.layers.selection.active = self.point_layer
 
 
     def recover(self, viewer):
