@@ -837,6 +837,11 @@ class Annotator(widgets.Container):
         if str(self.db_path.value) == '.':
             show_info('please select a database file')
             return
+        if str(self.image_path.value) == '.':
+            # e.g. reading the db first: loading the graph needs the image too,
+            # retrying after the image is selected gives the complete state
+            show_info('please select an image file')
+            return
         if self.G is None:
             p = index.Property(dimension=3)
             # load graph and rtree from database
