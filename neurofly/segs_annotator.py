@@ -133,9 +133,10 @@ class Annotator(widgets.Container):
         self.slice_enabled = widgets.CheckBox(label='slice plane', value=False)
         self.slice_azimuth = widgets.Slider(label='slice azimuth', value=90, min=0, max=360)
         self.slice_elevation = widgets.Slider(label='slice elevation', value=0, min=-90, max=90)
-        self.slice_thickness = widgets.Slider(label='slice thickness', value=10, min=1, max=64)
+        self.slice_thickness = widgets.Slider(label='slice thickness (µm)', value=300, min=20, max=2000)
         self.slice_offset = widgets.Slider(label='slice offset %', value=50, min=0, max=100)
-        self.slice_src_level = widgets.ComboBox(label='slice source level', choices=[])
+        self.slice_src_level = widgets.ComboBox(label='slice level', choices=[])
+        self.slice_box_um = widgets.Slider(label='slice box (µm)', value=4000, min=1000, max=12000)
         self.refresh_button = widgets.PushButton(text="refresh (d)")
         self.deconv_button = widgets.PushButton(text="deconvolve (i)")
         self.return_button = widgets.PushButton(text="last task (b)")
@@ -161,14 +162,16 @@ class Annotator(widgets.Container):
         self.image_size.changed.connect(self.clip_value)
         self.image_size.changed.connect(self._on_image_size_changed)
         for w in (self.slice_enabled, self.slice_azimuth, self.slice_elevation,
-                  self.slice_thickness, self.slice_offset):
+                  self.slice_thickness, self.slice_offset, self.slice_src_level,
+                  self.slice_box_um):
             w.changed.connect(self.update_slice_plane)
-        self.slice_src_level.changed.connect(self._on_slice_src_level)
         self._recrop_timer = QTimer()
         self._recrop_timer.setSingleShot(True)
         self._recrop_timer.setInterval(500)
         self._recrop_timer.timeout.connect(self._recrop_current)
         self.slice_nodes = None
+        self.slice_box_layer = None
+        self._box_state = None
         self._slicer_was_on = False
         self.refresh_button.clicked.connect(lambda: self.refresh(self.viewer,keep_image=False))
         self.recover_button.clicked.connect(self.recover)
@@ -842,37 +845,62 @@ class Annotator(widgets.Container):
 
 
     def update_slice_plane(self):
-        """Render a slicing plane with adjustable normal/thickness on the
-        panorama volume and show the db nodes inside the slab."""
-        pano = self.panorama_image
-        if self.image is None or pano is None or pano.data is None or not self.slice_enabled.value:
-            if pano is not None:
-                # plane 仅在 depiction='plane' 下渲染，回 volume 即关闭
-                pano.depiction = 'volume'
-                pano.visible = True
+        """Slicer: a fine axis-aligned box (read from the chosen pyramid level
+        around the plane center) carries the slicing plane, so sharp slices
+        work at fine levels without loading the whole volume in RAM."""
+        if self.image is None or self.panorama_image is None or self.panorama_image.data is None \
+                or not self.slice_enabled.value:
+            if self.panorama_image is not None:
+                self.panorama_image.visible = True
+            if self.slice_box_layer is not None:
+                self.slice_box_layer.visible = False
             if getattr(self, 'slice_nodes', None) is not None:
                 self.slice_nodes.visible = False
             self._slicer_was_on = False
             return
-        pano.depiction = 'plane'
-        normal = self._slice_plane_normal()
-        shape = np.asarray(pano.data.shape, dtype=float)
-        center = shape / 2.0
-        half_diag = 0.5 * np.linalg.norm(shape)
-        position = center + (self.slice_offset.value - 50) / 50.0 * half_diag * normal
-        thickness = float(self.slice_thickness.value)
-        pano.plane.position = position
-        pano.plane.normal = normal
-        pano.plane.thickness = thickness
-
-        # db nodes inside the slab: hr-level voxel coords (xyz) -> world (µm)
-        # -> panorama data coords -> signed distance to the plane
         resolution_level = self._heal_level_channel()
         if resolution_level is None:
             return
+        levels = list(self.image.resolution_levels)
+        level_name = self.slice_src_level.value
+        if level_name not in levels:
+            level_name = levels[0]
+        level_idx = levels.index(level_name)
+        spacing_s = np.asarray(self.image.info[level_idx]['spacing'], dtype=float)
+        normal = self._slice_plane_normal()
+
+        # plane center (world µm): whole-volume center + offset along the normal
+        roi = self.image.rois[level_idx]
+        volume_center = (np.asarray(roi[0:3], dtype=float) + np.asarray(roi[3:], dtype=float) / 2.0) * spacing_s
+        half_e = float(self.slice_box_um.value) / 2.0
+        P_world = volume_center + (self.slice_offset.value - 50) / 50.0 * half_e * normal
+
+        # read a fresh box only when needed (level change or plane moved out)
+        reuse = False
+        if self._box_state is not None:
+            box_level, origin_vox, half_vox, box_spacing = self._box_state
+            if box_level == level_name:
+                lo = np.asarray(origin_vox, dtype=float) + 0.1 * np.asarray(half_vox, dtype=float)
+                hi = np.asarray(origin_vox, dtype=float) + 1.9 * np.asarray(half_vox, dtype=float)
+                pv = P_world / spacing_s
+                reuse = bool(np.all(pv >= lo) and np.all(pv <= hi))
+        if not reuse:
+            self._read_slice_box(level_idx, level_name, spacing_s, P_world, E=2 * half_e)
+        box = self.slice_box_layer
+        if box is None:
+            return
+        origin_w = np.asarray(self._box_state[1], dtype=float) * spacing_s
+        pos_d = (P_world - origin_w) / spacing_s
+        normal_d = normal / spacing_s
+        normal_d /= np.linalg.norm(normal_d)
+        box.depiction = 'plane'
+        box.plane.position = pos_d
+        box.plane.normal = normal_d
+        box.plane.thickness = float(self.slice_thickness.value) / float(np.mean(spacing_s))
+        box.visible = True
+
+        # db nodes inside the slab (physical, world µm): hr-voxel coords -> world
         hr_spacing = np.asarray(self.image.info[resolution_level]['spacing'], dtype=float)
-        pano_scale = np.asarray(pano.scale, dtype=float)
-        pano_translate = np.asarray(pano.translate, dtype=float)
         pts = self.panorama_points.data
         props = self.panorama_points.properties
         if pts is None or len(pts) == 0:
@@ -882,10 +910,9 @@ class Annotator(widgets.Container):
             nids_all = np.asarray(props['nids']) if props and 'nids' in props else np.arange(len(pts))
         if len(pts) == 0:
             return
-        world = np.asarray(pts, dtype=float) * hr_spacing
-        pos_d = (world - pano_translate) / pano_scale
-        dist = (pos_d - position) @ normal
-        inside = np.abs(dist) <= thickness / 2.0
+        node_world = np.asarray(pts, dtype=float) * hr_spacing
+        dist = (node_world - P_world) @ normal
+        inside = np.abs(dist) <= float(self.slice_thickness.value) / 2.0
         sl = self._ensure_slice_nodes()
         # slice-nodes carry the same hr-voxel coords as panorama_points
         sl.scale = hr_spacing
@@ -898,30 +925,40 @@ class Annotator(widgets.Container):
         self._slicer_was_on = True
 
 
-    def _on_slice_src_level(self):
-        self._set_panorama_source_level(self.slice_src_level.value)
-
-
-    def _set_panorama_source_level(self, level_name):
-        """Swap the panorama volume to the chosen pyramid level so slicing
-        planes show sharper data (interactive cap: ~3 GB)."""
-        if self.image is None or self.panorama_image is None:
+    def _read_slice_box(self, level_idx, level_name, spacing_s, center_world, E):
+        """Read an E-sized axis-aligned box (world µm) around center_world from
+        the chosen pyramid level into the 'slice box' image layer."""
+        size_vox = np.asarray(self.image.info[level_idx]['image_size'], dtype=np.int64)
+        # 盒大于卷时钳到整卷，避免 origin/ext 的 clip 链出负值
+        half_vox = np.minimum((np.full(3, E / 2.0) / spacing_s).astype(np.int64), size_vox // 2)
+        center_vox = np.clip((center_world / spacing_s).astype(np.int64), half_vox, size_vox - half_vox)
+        origin_vox = center_vox - half_vox
+        ext_vox = 2 * half_vox
+        # RAM/GPU 纹理守卫：细层大盒可达几十 GB，超限引导换粗层或缩盒
+        ext_bytes = int(np.prod(ext_vox)) * 2
+        if ext_bytes > 4_000_000_000:
+            show_info(f'slice box too large at {level_name} ({ext_bytes / 1e9:.1f} GB): '
+                      'reduce box size or pick a coarser level')
             return
-        levels = list(self.image.resolution_levels)
-        if level_name not in levels:
-            return
-        idx = levels.index(level_name)
-        size = np.asarray(self.image.rois[idx][3:], dtype=np.int64)
-        if int(np.prod(size)) * 2 > 3_000_000_000:
-            show_info('source level too large for interactive slicing, pick a coarser level')
-            return
-        show_info(f'loading panorama at {level_name} ...')
-        vol = self.image.from_roi(self.image.rois[idx], levels[idx], str(self.channel.value))
-        spacing = np.asarray(self.image.info[idx]['spacing'], dtype=float)
-        self.panorama_image.data = np.asarray(vol)
-        self.panorama_image.scale = spacing
-        self.panorama_image.metadata['loaded'] = True
-        self.update_slice_plane()
+        show_info(f'loading slice box at {level_name} ...')
+        sub = np.asarray(self.image.from_roi(
+            [int(origin_vox[0]), int(origin_vox[1]), int(origin_vox[2]),
+             int(ext_vox[0]), int(ext_vox[1]), int(ext_vox[2])],
+            level_name, str(self.channel.value)))
+        origin_world = origin_vox * spacing_s
+        if self.slice_box_layer is None:
+            self.slice_box_layer = self.viewer.add_image(
+                sub, name='slice box', scale=spacing_s, translate=origin_world,
+                colormap='gray')
+        else:
+            self.slice_box_layer.data = sub
+            self.slice_box_layer.scale = spacing_s
+            self.slice_box_layer.translate = origin_world
+            self.slice_box_layer.refresh()
+        self.slice_box_layer.reset_contrast_limits()
+        self.slice_box_layer.visible = True
+        self._box_state = (level_name, origin_vox.tolist(), half_vox.tolist(),
+                           spacing_s.tolist())
 
 
     def recover(self, viewer):
