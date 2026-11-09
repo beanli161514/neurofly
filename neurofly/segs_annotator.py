@@ -135,6 +135,7 @@ class Annotator(widgets.Container):
         self.slice_elevation = widgets.Slider(label='slice elevation', value=0, min=-90, max=90)
         self.slice_thickness = widgets.Slider(label='slice thickness', value=10, min=1, max=64)
         self.slice_offset = widgets.Slider(label='slice offset %', value=50, min=0, max=100)
+        self.slice_src_level = widgets.ComboBox(label='slice source level', choices=[])
         self.refresh_button = widgets.PushButton(text="refresh (d)")
         self.deconv_button = widgets.PushButton(text="deconvolve (i)")
         self.return_button = widgets.PushButton(text="last task (b)")
@@ -162,11 +163,13 @@ class Annotator(widgets.Container):
         for w in (self.slice_enabled, self.slice_azimuth, self.slice_elevation,
                   self.slice_thickness, self.slice_offset):
             w.changed.connect(self.update_slice_plane)
+        self.slice_src_level.changed.connect(self._on_slice_src_level)
         self._recrop_timer = QTimer()
         self._recrop_timer.setSingleShot(True)
         self._recrop_timer.setInterval(500)
         self._recrop_timer.timeout.connect(self._recrop_current)
         self.slice_nodes = None
+        self._slicer_was_on = False
         self.refresh_button.clicked.connect(lambda: self.refresh(self.viewer,keep_image=False))
         self.recover_button.clicked.connect(self.recover)
         self.return_button.clicked.connect(self.last_task)
@@ -214,6 +217,7 @@ class Annotator(widgets.Container):
             self.slice_elevation,
             self.slice_thickness,
             self.slice_offset,
+            self.slice_src_level,
             self.node_type_dropdown,
             self.refresh_button,
             self.return_button,
@@ -292,6 +296,15 @@ class Annotator(widgets.Container):
         self.level.choices = resolution_levels
         self.level.value = resolution_levels[0]
         # self.level.changed.connect(self.on_resolution_change)
+        # hi-res slice source levels (default = the coarse panorama level;
+        # user can pick a finer level for sharper slices)
+        self.slice_src_level.choices = resolution_levels
+        pano_level = 0
+        for i, roi in enumerate(self.image.rois):
+            if (np.array(roi[3:]) < np.array([1000, 1000, 1000])).all():
+                pano_level = i
+                break
+        self.slice_src_level.value = resolution_levels[pano_level]
 
 
     def on_reading_db(self):
@@ -810,8 +823,22 @@ class Annotator(widgets.Container):
             self.slice_nodes = self.viewer.add_points(
                 name='slice nodes', face_color='#ff9f1c', size=4,
                 shading='spherical', ndim=3)
+            # click a node on the slice = select it (same as panorama view)
+            self.slice_nodes.mouse_drag_callbacks.append(self.slice_node_selection)
         self.slice_nodes.visible = True
         return self.slice_nodes
+
+
+    def slice_node_selection(self, layer, event):
+        if event.button == 1:
+            index = layer.click_get_value(
+                event.position,
+                view_direction=event.view_direction,
+                dims_displayed=event.dims_displayed,
+                world=True,
+            )
+            if index is not None:
+                self.selected_node.value = str(layer.properties['nids'][index])
 
 
     def update_slice_plane(self):
@@ -822,8 +849,10 @@ class Annotator(widgets.Container):
             if pano is not None:
                 # plane 仅在 depiction='plane' 下渲染，回 volume 即关闭
                 pano.depiction = 'volume'
+                pano.visible = True
             if getattr(self, 'slice_nodes', None) is not None:
                 self.slice_nodes.visible = False
+            self._slicer_was_on = False
             return
         pano.depiction = 'plane'
         normal = self._slice_plane_normal()
@@ -845,8 +874,12 @@ class Annotator(widgets.Container):
         pano_scale = np.asarray(pano.scale, dtype=float)
         pano_translate = np.asarray(pano.translate, dtype=float)
         pts = self.panorama_points.data
+        props = self.panorama_points.properties
         if pts is None or len(pts) == 0:
             pts = np.array([self.G.nodes[n]['coord'] for n in self.G.nodes])
+            nids_all = np.asarray(list(self.G.nodes))
+        else:
+            nids_all = np.asarray(props['nids']) if props and 'nids' in props else np.arange(len(pts))
         if len(pts) == 0:
             return
         world = np.asarray(pts, dtype=float) * hr_spacing
@@ -858,6 +891,37 @@ class Annotator(widgets.Container):
         sl.scale = hr_spacing
         sl.translate = [0.0, 0.0, 0.0]
         sl.data = np.asarray(pts)[inside]
+        sl.properties = {'nids': nids_all[inside]}
+        if not self._slicer_was_on:
+            # 勾选 slicer 即进入选点交互（点击节点=选中，q 进 labeling）
+            self.viewer.layers.selection.active = sl
+        self._slicer_was_on = True
+
+
+    def _on_slice_src_level(self):
+        self._set_panorama_source_level(self.slice_src_level.value)
+
+
+    def _set_panorama_source_level(self, level_name):
+        """Swap the panorama volume to the chosen pyramid level so slicing
+        planes show sharper data (interactive cap: ~3 GB)."""
+        if self.image is None or self.panorama_image is None:
+            return
+        levels = list(self.image.resolution_levels)
+        if level_name not in levels:
+            return
+        idx = levels.index(level_name)
+        size = np.asarray(self.image.rois[idx][3:], dtype=np.int64)
+        if int(np.prod(size)) * 2 > 3_000_000_000:
+            show_info('source level too large for interactive slicing, pick a coarser level')
+            return
+        show_info(f'loading panorama at {level_name} ...')
+        vol = self.image.from_roi(self.image.rois[idx], levels[idx], str(self.channel.value))
+        spacing = np.asarray(self.image.info[idx]['spacing'], dtype=float)
+        self.panorama_image.data = np.asarray(vol)
+        self.panorama_image.scale = spacing
+        self.panorama_image.metadata['loaded'] = True
+        self.update_slice_plane()
 
 
     def recover(self, viewer):
