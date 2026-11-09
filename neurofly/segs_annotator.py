@@ -714,10 +714,39 @@ class Annotator(widgets.Container):
         self.viewer.layers.selection.active = self.point_layer
 
 
+    def _heal_level_channel(self):
+        """napari clears magicgui ComboBox choices whenever layers are added or
+        removed; neurofly builds its choices once so they die after that
+        (value becomes None and lookups like resolution_levels.index crash).
+        Rebuild the level/channel choices from self.image in a blocked psygnal
+        context (no handler side effects). Returns the current resolution
+        level index, or None if there is no image loaded."""
+        if self.image is None:
+            return None
+        levels = list(self.image.resolution_levels)
+        if len(list(self.level.choices)) != len(levels) or self.level.value not in levels:
+            prev = self.level.value if self.level.value in levels else None
+            with self.level.changed.blocked():
+                self.level.choices = levels
+                if prev is None:
+                    prev = levels[min(getattr(self, '_last_level_idx', 0), len(levels) - 1)]
+                self.level.value = prev
+        self._last_level_idx = levels.index(self.level.value)
+        channels = list(self.image.channels)
+        if len(list(self.channel.choices)) != len(channels) or self.channel.value not in channels:
+            chan = self.channel.value if self.channel.value in channels else None
+            with self.channel.changed.blocked():
+                self.channel.choices = channels
+                self.channel.value = chan if chan is not None else channels[0]
+        return levels.index(self.level.value)
+
+
     def _crop_block(self, c_coord, coords):
         """Load the 64..1024³ block around c_coord and sync every coordinate
         layer to the physical (µm) world. Shared by refresh (task switch) and
         the debounced block-size re-crop."""
+        if self._heal_level_channel() is None:
+            return
         channel = str(self.channel.value)
         resolution_level = str(self.level.value)
         image = self.image.from_roi([i-self.image_size.value//2 for i in c_coord]+[self.image_size.value,self.image_size.value,self.image_size.value], level=resolution_level, channel=channel)
@@ -809,7 +838,9 @@ class Annotator(widgets.Container):
 
         # db nodes inside the slab: hr-level voxel coords (xyz) -> world (µm)
         # -> panorama data coords -> signed distance to the plane
-        resolution_level = self.image.resolution_levels.index(str(self.level.value))
+        resolution_level = self._heal_level_channel()
+        if resolution_level is None:
+            return
         hr_spacing = np.asarray(self.image.info[resolution_level]['spacing'], dtype=float)
         pano_scale = np.asarray(pano.scale, dtype=float)
         pano_translate = np.asarray(pano.translate, dtype=float)
@@ -949,6 +980,9 @@ class Annotator(widgets.Container):
             # retrying after the image is selected gives the complete state
             show_info('please select an image file')
             return
+        resolution_level = self._heal_level_channel()
+        if resolution_level is None:
+            return
         if self.G is None:
             p = index.Property(dimension=3)
             # load graph and rtree from database
@@ -976,7 +1010,6 @@ class Annotator(widgets.Container):
                     break
             # per-axis physical spacing (µm/voxel) instead of size ratios,
             # so anisotropic datasets keep true proportions (resolves the TODO below)
-            resolution_level = self.image.resolution_levels.index(str(self.level.value))
             spacing = self.image.info[resolution_level]['spacing']
             pano_spacing = self.image.info[level]['spacing']
 
@@ -1048,8 +1081,7 @@ class Annotator(widgets.Container):
             'colors': colors,
             'nids': np.array(nids)
         }
-        
-        resolution_level = self.image.resolution_levels.index(str(self.level.value))
+
         spacing = self.image.info[resolution_level]['spacing']
         camera_center  = [(i + j//2)*s for i,j,s in zip(self.image.rois[resolution_level][0:3],self.image.rois[resolution_level][3:],spacing)]
 
