@@ -1069,7 +1069,10 @@ class Annotator(widgets.Container):
         self.nodes_left.value = int(n_nodes)
 
 
-    def refresh_panorama(self):
+    def refresh_panorama(self, *args):
+        # *args: magicgui PushButton.changed emits the button value (False);
+        # a plain (self) signature crashed with "takes 1 positional argument
+        # but 2 were given" when wired to that signal
         if self.mode_switch.mode == 'labeling':
             show_info('switch to panorama mode first')
             return
