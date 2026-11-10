@@ -173,6 +173,8 @@ class Annotator(widgets.Container):
         self.slice_box_layer = None
         self._box_state = None
         self._slicer_was_on = False
+        self._slice_pivot = None
+        self._slice_pivot_offset = None
         self.refresh_button.clicked.connect(lambda: self.refresh(self.viewer,keep_image=False))
         self.recover_button.clicked.connect(self.recover)
         self.return_button.clicked.connect(self.last_task)
@@ -889,7 +891,19 @@ class Annotator(widgets.Container):
         roi = self.image.rois[level_idx]
         volume_center = (np.asarray(roi[0:3], dtype=float) + np.asarray(roi[3:], dtype=float) / 2.0) * spacing_s
         half_e = float(self.slice_box_um.value) / 2.0
-        P_world = volume_center + (self.slice_offset.value - 50) / 50.0 * half_e * normal
+        # rotate around a fixed pivot; only the offset slider moves the pivot
+        # (along the current normal) - otherwise rotating the normal would
+        # swing the plane center on a circle and the slab would sweep the
+        # node cloud far faster than the rotation itself
+        if getattr(self, '_slice_pivot', None) is None or self._slice_pivot_offset != self.slice_offset.value:
+            shift = (self.slice_offset.value - 50) / 50.0 * half_e
+            self._slice_pivot = volume_center + shift * normal
+            self._slice_pivot_offset = self.slice_offset.value
+        # pivot 可能在体积外（offset 推出边界）：钳到当前层体积范围，
+        # 否则 reuse 判定永远失败 → 每次 slider 事件都重读一次
+        roi_lo_w = np.asarray(roi[0:3], dtype=float) * spacing_s
+        roi_hi_w = (np.asarray(roi[0:3], dtype=float) + np.asarray(roi[3:], dtype=float)) * spacing_s
+        P_world = np.clip(self._slice_pivot, roi_lo_w, roi_hi_w)
 
         # if the box does not fit in RAM at this level, step coarser until it
         # does (info only when the resolved level actually changes — slider
@@ -914,8 +928,11 @@ class Annotator(widgets.Container):
         if self._box_state is not None:
             box_level, origin_vox, half_vox, box_spacing = self._box_state
             if box_level == level_name:
-                lo = np.asarray(origin_vox, dtype=float) + 0.1 * np.asarray(half_vox, dtype=float)
-                hi = np.asarray(origin_vox, dtype=float) + 1.9 * np.asarray(half_vox, dtype=float)
+                # hard bounds: when the box is clamped to the volume edge, P
+                # stays at the boundary forever - a margin here would re-read
+                # on every slider event for identical data
+                lo = np.asarray(origin_vox, dtype=float) - 1.0
+                hi = np.asarray(origin_vox, dtype=float) + 2.0 * np.asarray(half_vox, dtype=float) + 1.0
                 pv = P_world / spacing_s
                 reuse = bool(np.all(pv >= lo) and np.all(pv <= hi))
         if not reuse:
