@@ -2,6 +2,7 @@ import numpy as np
 import napari
 import os
 from magicgui import magicgui, widgets
+from napari.utils.notifications import show_info
 from neurofly.image_reader import wrap_image
 from tifffile import imwrite
 
@@ -161,8 +162,17 @@ class SimpleViewer(widgets.Container):
         roi = [int(float(self.x.value)) ,int(float(self.y.value)), int(float(self.z.value)),int(self.x_size.value), int(self.y_size.value), int(self.z_size.value)]
         channel = str(self.channel_dropdown.value)
         resolution_level = str(self.resolution_dropdown.value)
+        # anisotropic datasets: per-axis physical spacing (µm/voxel) for the layer
+        # scale; the block origin is kept in voxels for on_double_click
+        spacing = self.image.info[self.image.resolution_levels.index(resolution_level)]['spacing']
+        self._image_origin = roi[:3]
         self.image_layer.data = self.image.from_roi(roi, resolution_level, channel)
-        self.image_layer.translate = roi[:3]
+        self.image_layer.scale = spacing
+        self.image_layer.translate = [i*j for i,j in zip(roi[:3],spacing)]
+        if self.goal_layer is not None:
+            # goal carries level-voxel absolute coordinates
+            self.goal_layer.scale = spacing
+            self.goal_layer.translate = [0.0,0.0,0.0]
         camera_state = self.viewer.camera.angles
         self.viewer.reset_view()
         self.viewer.camera.angles = camera_state
@@ -177,9 +187,15 @@ class SimpleViewer(widgets.Container):
         if min(image_size)>1024:
             return
         roi = self.image.rois[self.image.resolution_levels.index(self.resolution_dropdown.value)]
+        spacing = self.image.info[self.image.resolution_levels.index(self.resolution_dropdown.value)]['spacing']
+        self._image_origin = roi[:3]
         image = self.image.from_roi(roi, self.resolution_dropdown.value, self.channel_dropdown.value)
         self.image_layer.data = image
-        self.image_layer.translate = roi[:3]
+        self.image_layer.scale = spacing
+        self.image_layer.translate = [i*j for i,j in zip(roi[:3],spacing)]
+        if self.goal_layer is not None:
+            self.goal_layer.scale = spacing
+            self.goal_layer.translate = [0.0,0.0,0.0]
         camera_state = self.viewer.camera.angles
         self.viewer.reset_view()
         self.viewer.camera.angles = camera_state
@@ -245,6 +261,11 @@ class SimpleViewer(widgets.Container):
             event.view_direction,
             event.dims_displayed
         )
+        if near_point is None or far_point is None:
+            # the click ray does not pass through the image volume
+            # (e.g. clicking outside the block in 3D view)
+            show_info("double click is outside the image volume")
+            return
         sample_ray = far_point - near_point
         length_sample_vector = np.linalg.norm(sample_ray)
         increment_vector = sample_ray / (2 * length_sample_vector)
@@ -264,7 +285,7 @@ class SimpleViewer(widgets.Container):
             values.append(value)
         max_point_index = values.index(max(values))
         max_point = sample_points[max_point_index]
-        max_point = [i+j for i,j in zip(max_point,self.image_layer.translate)]
+        max_point = [i+j for i,j in zip(max_point,getattr(self,'_image_origin',[0,0,0]))]
         print('Put point at: ', max_point)
         if(event.button==1):
             self.goal_layer.data = max_point
