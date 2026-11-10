@@ -867,16 +867,20 @@ class Annotator(widgets.Container):
             return
         levels = list(self.image.resolution_levels)
         # napari layer events clear our combo too — heal it like the level
-        # combo, falling back to the panorama level (never to L0)
-        pano_idx = min(getattr(self, '_last_level_idx', 0), len(levels) - 1)
+        # combo, falling back to the resolved level (default: panorama level,
+        # never a fine level we cannot afford)
+        pano_idx = getattr(self, '_pano_level_idx', getattr(self, '_last_level_idx', 0))
+        pano_idx = min(pano_idx, len(levels) - 1)
+        resolved_idx = getattr(self, '_resolved_level_idx', pano_idx)
+        resolved_idx = min(resolved_idx, len(levels) - 1)
         if len(list(self.slice_src_level.choices)) != len(levels) or self.slice_src_level.value not in levels:
             prev = self.slice_src_level.value if self.slice_src_level.value in levels else None
             with self.slice_src_level.changed.blocked():
                 self.slice_src_level.choices = levels
-                self.slice_src_level.value = prev if prev is not None else levels[pano_idx]
+                self.slice_src_level.value = prev if prev is not None else levels[resolved_idx]
         level_name = self.slice_src_level.value
         if level_name not in levels:
-            level_name = levels[pano_idx]
+            level_name = levels[resolved_idx]
         level_idx = levels.index(level_name)
         spacing_s = np.asarray(self.image.info[level_idx]['spacing'], dtype=float)
         normal = self._slice_plane_normal()
@@ -887,6 +891,24 @@ class Annotator(widgets.Container):
         half_e = float(self.slice_box_um.value) / 2.0
         P_world = volume_center + (self.slice_offset.value - 50) / 50.0 * half_e * normal
 
+        # if the box does not fit in RAM at this level, step coarser until it
+        # does (info only when the resolved level actually changes — slider
+        # events must not spam)
+        size_req = np.asarray(self.image.info[level_idx]['image_size'], dtype=np.int64)
+        half_req = np.minimum((np.full(3, half_e) / spacing_s).astype(np.int64), size_req // 2)
+        requested_idx = level_idx
+        while int(np.prod(2 * half_req)) * 2 > 4_000_000_000 and level_idx < len(levels) - 1:
+            level_idx += 1
+            spacing_s = np.asarray(self.image.info[level_idx]['spacing'], dtype=float)
+            size_req = np.asarray(self.image.info[level_idx]['image_size'], dtype=np.int64)
+            half_req = np.minimum((np.full(3, half_e) / spacing_s).astype(np.int64), size_req // 2)
+        if getattr(self, '_resolved_level_idx', None) != level_idx:
+            if requested_idx != level_idx:
+                show_info(f'box too large at {levels[requested_idx]}, using {levels[level_idx]}')
+            with self.slice_src_level.changed.blocked():
+                self.slice_src_level.value = levels[level_idx]
+            self._resolved_level_idx = level_idx
+
         # read a fresh box only when needed (level change or plane moved out)
         reuse = False
         if self._box_state is not None:
@@ -896,19 +918,6 @@ class Annotator(widgets.Container):
                 hi = np.asarray(origin_vox, dtype=float) + 1.9 * np.asarray(half_vox, dtype=float)
                 pv = P_world / spacing_s
                 reuse = bool(np.all(pv >= lo) and np.all(pv <= hi))
-        # if the requested level cannot hold the box, step coarser until it fits
-        size_req = np.asarray(self.image.info[level_idx]['image_size'], dtype=np.int64)
-        half_req = np.minimum((np.full(3, half_e) / spacing_s).astype(np.int64), size_req // 2)
-        while int(np.prod(2 * half_req)) * 2 > 4_000_000_000 and level_idx < len(levels) - 1:
-            level_idx += 1
-            spacing_s = np.asarray(self.image.info[level_idx]['spacing'], dtype=float)
-            size_req = np.asarray(self.image.info[level_idx]['image_size'], dtype=np.int64)
-            half_req = np.minimum((np.full(3, half_e) / spacing_s).astype(np.int64), size_req // 2)
-        if level_idx != resolution_level:
-            show_info(f'box too large at {levels[resolution_level]}, using {levels[level_idx]}')
-            with self.slice_src_level.changed.blocked():
-                self.slice_src_level.value = levels[level_idx]
-            level_name = levels[level_idx]
         if not reuse:
             self._read_slice_box(level_idx, level_name, spacing_s, P_world, E=2 * half_e)
         box = self.slice_box_layer
