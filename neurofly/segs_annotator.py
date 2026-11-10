@@ -136,7 +136,7 @@ class Annotator(widgets.Container):
         self.slice_thickness = widgets.Slider(label='slice thickness (µm)', value=300, min=20, max=2000)
         self.slice_offset = widgets.Slider(label='slice offset %', value=50, min=0, max=100)
         self.slice_src_level = widgets.ComboBox(label='slice level', choices=[])
-        self.slice_box_um = widgets.Slider(label='slice box (µm)', value=4000, min=1000, max=12000)
+        self.slice_box_um = widgets.Slider(label='slice box (µm)', value=30000, min=1000, max=30000)
         self.refresh_button = widgets.PushButton(text="refresh (d)")
         self.deconv_button = widgets.PushButton(text="deconvolve (i)")
         self.return_button = widgets.PushButton(text="last task (b)")
@@ -308,6 +308,8 @@ class Annotator(widgets.Container):
                 pano_level = i
                 break
         self.slice_src_level.value = resolution_levels[pano_level]
+        # combo-heal falls back to the coarse panorama level, never to L0
+        self._last_level_idx = pano_level
 
 
     def on_reading_db(self):
@@ -834,8 +836,10 @@ class Annotator(widgets.Container):
 
     def slice_node_selection(self, layer, event):
         if event.button == 1:
-            index = layer.click_get_value(
-                event.position,
+            # napari 0.7 removed click_get_value; _get_value_ is what the
+            # Points select binding itself uses
+            index = layer._get_value_(
+                position=event.position,
                 view_direction=event.view_direction,
                 dims_displayed=event.dims_displayed,
                 world=True,
