@@ -866,9 +866,17 @@ class Annotator(widgets.Container):
         if resolution_level is None:
             return
         levels = list(self.image.resolution_levels)
+        # napari layer events clear our combo too — heal it like the level
+        # combo, falling back to the panorama level (never to L0)
+        pano_idx = min(getattr(self, '_last_level_idx', 0), len(levels) - 1)
+        if len(list(self.slice_src_level.choices)) != len(levels) or self.slice_src_level.value not in levels:
+            prev = self.slice_src_level.value if self.slice_src_level.value in levels else None
+            with self.slice_src_level.changed.blocked():
+                self.slice_src_level.choices = levels
+                self.slice_src_level.value = prev if prev is not None else levels[pano_idx]
         level_name = self.slice_src_level.value
         if level_name not in levels:
-            level_name = levels[0]
+            level_name = levels[pano_idx]
         level_idx = levels.index(level_name)
         spacing_s = np.asarray(self.image.info[level_idx]['spacing'], dtype=float)
         normal = self._slice_plane_normal()
@@ -888,11 +896,25 @@ class Annotator(widgets.Container):
                 hi = np.asarray(origin_vox, dtype=float) + 1.9 * np.asarray(half_vox, dtype=float)
                 pv = P_world / spacing_s
                 reuse = bool(np.all(pv >= lo) and np.all(pv <= hi))
+        # if the requested level cannot hold the box, step coarser until it fits
+        size_req = np.asarray(self.image.info[level_idx]['image_size'], dtype=np.int64)
+        half_req = np.minimum((np.full(3, half_e) / spacing_s).astype(np.int64), size_req // 2)
+        while int(np.prod(2 * half_req)) * 2 > 4_000_000_000 and level_idx < len(levels) - 1:
+            level_idx += 1
+            spacing_s = np.asarray(self.image.info[level_idx]['spacing'], dtype=float)
+            size_req = np.asarray(self.image.info[level_idx]['image_size'], dtype=np.int64)
+            half_req = np.minimum((np.full(3, half_e) / spacing_s).astype(np.int64), size_req // 2)
+        if level_idx != resolution_level:
+            show_info(f'box too large at {levels[resolution_level]}, using {levels[level_idx]}')
+            with self.slice_src_level.changed.blocked():
+                self.slice_src_level.value = levels[level_idx]
+            level_name = levels[level_idx]
         if not reuse:
             self._read_slice_box(level_idx, level_name, spacing_s, P_world, E=2 * half_e)
         box = self.slice_box_layer
         if box is None:
             return
+        box.visible = True
         origin_w = np.asarray(self._box_state[1], dtype=float) * spacing_s
         pos_d = (P_world - origin_w) / spacing_s
         normal_d = normal / spacing_s
