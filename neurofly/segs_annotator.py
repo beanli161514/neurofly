@@ -966,13 +966,14 @@ class Annotator(widgets.Container):
             self._set_layer_translate(sv, pano.translate)
         sv.visible = True
         sv.depiction = 'plane'
-        # 场景被 shift 拖动过：切面/板/节点的实际世界位置 = P_world + 场景偏移，
-        # 三处必须用同一个中心，否则板读到拖动后的位置、切面却画在原位（板
-        # 在视图里"消失"）
+        # 场景 shift 拖动的偏移 t_scene：板**读取**用真实世界坐标（P_world，
+        # 与视图无关），**显示**时再加 t_scene（板跟着拖动的场景走），切面
+        # 位置两边抵消恒等于真实帧 —— 之前把 t_scene 混进读取坐标，板被裁
+        # 剪到体积边缘，切面落在板外，表现为切面层"消失"
         t_scene = np.asarray(self.panorama_points.translate, dtype=float)
         P_scene = P_world + t_scene
         if requested_idx != pano_idx:
-            self._request_slice_slab(requested_idx, P_scene, normal_world)
+            self._request_slice_slab(requested_idx, P_world, normal_world)
         sv.plane.position = (P_scene - np.asarray(sv.translate, dtype=float)) / np.asarray(sv.scale, dtype=float)
         n_d_unit = normal / np.linalg.norm(normal)
         sv.plane.normal = n_d_unit
@@ -1162,7 +1163,9 @@ class Annotator(widgets.Container):
             return  # 已有更大的板盖住这块晚到的（比如刚补读了一块更全的）
         sv.data = data
         sv.scale = tuple(float(v) for v in spacing_s)
-        self._set_layer_translate(sv, (roi0 + np.asarray(lo, dtype=float)) * spacing_s)
+        # 显示位置 = 板的真实世界位置 + 场景 shift 拖动偏移（与切面/节点同帧）
+        t_scene = np.asarray(self.panorama_points.translate, dtype=float)
+        self._set_layer_translate(sv, (roi0 + np.asarray(lo, dtype=float)) * spacing_s + t_scene)
         try:
             sv.reset_contrast_limits()
         except Exception:
