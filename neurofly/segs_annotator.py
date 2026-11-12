@@ -966,11 +966,14 @@ class Annotator(widgets.Container):
             self._set_layer_translate(sv, pano.translate)
         sv.visible = True
         sv.depiction = 'plane'
+        # 场景被 shift 拖动过：切面/板/节点的实际世界位置 = P_world + 场景偏移，
+        # 三处必须用同一个中心，否则板读到拖动后的位置、切面却画在原位（板
+        # 在视图里"消失"）
+        t_scene = np.asarray(self.panorama_points.translate, dtype=float)
+        P_scene = P_world + t_scene
         if requested_idx != pano_idx:
-            # 场景被 shift 拖动过：切面/板的实际世界位置 = P_world + 场景偏移
-            t_scene = np.asarray(self.panorama_points.translate, dtype=float)
-            self._request_slice_slab(requested_idx, P_world + t_scene, normal_world)
-        sv.plane.position = (P_world - np.asarray(sv.translate, dtype=float)) / np.asarray(sv.scale, dtype=float)
+            self._request_slice_slab(requested_idx, P_scene, normal_world)
+        sv.plane.position = (P_scene - np.asarray(sv.translate, dtype=float)) / np.asarray(sv.scale, dtype=float)
         n_d_unit = normal / np.linalg.norm(normal)
         sv.plane.normal = n_d_unit
         # 物理板厚 = thickness_data × |spacing·n̂_d|；按 sv 自己的 scale 换算
@@ -995,7 +998,7 @@ class Annotator(widgets.Container):
             return
         t_scene = np.asarray(self.panorama_points.translate, dtype=float)
         node_world = np.asarray(pts, dtype=float) * hr_spacing + t_scene
-        dist = (node_world - P_world) @ normal_world
+        dist = (node_world - (P_world + t_scene)) @ normal_world
         inside = np.abs(dist) <= float(self.slice_thickness.value) / 2.0
         sl = self._ensure_slice_nodes()
         # slice-nodes carry the same hr-voxel coords as panorama_points；
