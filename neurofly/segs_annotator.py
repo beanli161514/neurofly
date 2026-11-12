@@ -3,6 +3,8 @@ import networkx as nx
 import napari
 import random
 import shutil
+import threading
+from qtpy.QtCore import QTimer
 from neurofly.dbio import read_edges, read_nodes, add_nodes, add_edges, check_node, uncheck_nodes, change_type, delete_nodes
 from magicgui import widgets
 from neurofly.image_reader import wrap_image
@@ -27,6 +29,14 @@ class Annotator(widgets.Container):
         # panorama mode
         self.panorama_image = self.viewer.add_image(np.ones((64, 64, 64), dtype=np.uint16), name='panorama image', metadata={'loaded': False},visible=False)
         self.panorama_points = self.viewer.add_points(None,ndim=3,size=None,shading='spherical',border_width=0,properties=None,face_colormap='hsl',name='panorama view',blending='additive',visible=True)
+        # shift 拖动图像层移动场景时，其余层（节点/切面板）必须跟随同一世
+        # 界偏移，否则板拖走了节点停在原地。记录各层最近 translate，用户拖
+        # 动产生 delta 时同步到其它层；我们自己写 translate 都走
+        # _set_layer_translate（blocked + 更新记录），不会误触发
+        self._scene_translate_last = {}
+        for lyr in (self.panorama_image, self.panorama_points):
+            self._scene_translate_last[id(lyr)] = np.asarray(lyr.translate, dtype=float)
+            lyr.events.translate.connect(self._on_scene_translate)
         self.panorama_points.click_get_value = self.panorama_points.get_value
         self.panorama_points.get_value = lambda position, view_direction=None, dims_displayed=None, world=False: None
         # labeling mode
@@ -129,6 +139,12 @@ class Annotator(widgets.Container):
         self.total_nodes_left = widgets.LineEdit(label="total nodes left", value=0)
         self.nodes_left = widgets.LineEdit(label="nodes left", value=0)
         self.image_size = widgets.Slider(label="block size", value=64, min=64, max=1024)
+        self.slice_enabled = widgets.CheckBox(label='slice plane', value=False)
+        self.slice_azimuth = widgets.Slider(label='slice azimuth', value=90, min=0, max=360)
+        self.slice_elevation = widgets.Slider(label='slice elevation', value=0, min=-90, max=90)
+        self.slice_thickness = widgets.Slider(label='slice thickness (µm)', value=300, min=20, max=2000)
+        self.slice_offset = widgets.Slider(label='slice offset %', value=50, min=0, max=100)
+        self.slice_src_level = widgets.ComboBox(label='slice level', choices=[])
         self.refresh_button = widgets.PushButton(text="refresh (d)")
         self.deconv_button = widgets.PushButton(text="deconvolve (i)")
         self.return_button = widgets.PushButton(text="last task (b)")
@@ -152,6 +168,36 @@ class Annotator(widgets.Container):
         self.refresh_panorama_button.clicked.connect(self.refresh_panorama)
         self.mode_switch.clicked.connect(self.switch_mode)
         self.image_size.changed.connect(self.clip_value)
+        self.image_size.changed.connect(self._on_image_size_changed)
+        for w in (self.slice_enabled, self.slice_azimuth, self.slice_elevation,
+                  self.slice_thickness, self.slice_offset, self.slice_src_level):
+            w.changed.connect(self.update_slice_plane)
+        self._recrop_timer = QTimer()
+        self._recrop_timer.setSingleShot(True)
+        self._recrop_timer.setInterval(500)
+        self._recrop_timer.timeout.connect(self._recrop_current)
+        self.slice_nodes = None
+        self.slice_volume_layer = None
+        self._slicer_was_on = False
+        self._slice_pivot = None
+        self._slice_pivot_offset = None
+        self._slice_level_request = None
+        # 切面清晰度：只后台读切面穿过的板状区域（世界系轴对齐包围盒，
+        # 按存储块粒度实际只触碰相交块），读完把 slice volume 层换成该板
+        self._slice_slab_level = None    # 已装载板的层级
+        self._slice_slab_box = None      # 已装载板的 (lo, hi) level-voxel 界（hi 独占）
+        self._slice_slab_loading = None  # 正在后台读的 (level_idx, lo, hi)
+        self._slice_slab_pending = None  # 读好的 (level_idx, lo, hi, data)，主线程收
+        self._slab_need = None           # 防抖期间记下的 (level_idx, lo, hi)
+        self._slab_refused_key = None    # 超限提示只弹一次
+        self._slab_read_timer = QTimer()  # 出界防抖：滑杆停稳 500ms 才发起补读
+        self._slab_read_timer.setSingleShot(True)
+        self._slab_read_timer.setInterval(500)
+        self._slab_read_timer.timeout.connect(self._start_slab_read)
+        self._slice_load_timer = QTimer()
+        self._slice_load_timer.setInterval(400)
+        self._slice_load_timer.timeout.connect(self._poll_slice_load)
+        self._slice_load_timer.start()
         self.refresh_button.clicked.connect(lambda: self.refresh(self.viewer,keep_image=False))
         self.recover_button.clicked.connect(self.recover)
         self.return_button.clicked.connect(self.last_task)
@@ -194,6 +240,12 @@ class Annotator(widgets.Container):
             self.total_nodes_left,
             self.proofreading_switch,
             self.image_size,
+            self.slice_enabled,
+            self.slice_azimuth,
+            self.slice_elevation,
+            self.slice_thickness,
+            self.slice_offset,
+            self.slice_src_level,
             self.node_type_dropdown,
             self.refresh_button,
             self.return_button,
@@ -272,6 +324,17 @@ class Annotator(widgets.Container):
         self.level.choices = resolution_levels
         self.level.value = resolution_levels[0]
         # self.level.changed.connect(self.on_resolution_change)
+        # hi-res slice source levels (default = the coarse panorama level;
+        # user can pick a finer level for sharper slices)
+        self.slice_src_level.choices = resolution_levels
+        pano_level = 0
+        for i, roi in enumerate(self.image.rois):
+            if (np.array(roi[3:]) < np.array([1000, 1000, 1000])).all():
+                pano_level = i
+                break
+        self.slice_src_level.value = resolution_levels[pano_level]
+        # combo-heal falls back to the coarse panorama level, never to L0
+        self._last_level_idx = pano_level
 
 
     def on_reading_db(self):
@@ -496,6 +559,8 @@ class Annotator(widgets.Container):
             self.mode_switch.mode = 'labeling'
             self.panorama_points.visible = False
             self.panorama_image.visible = False
+            if getattr(self, 'slice_nodes', None) is not None:
+                self.slice_nodes.visible = False
             self.point_layer.visible = True
             self.image_layer.visible = True
             self.edge_layer.visible = True
@@ -676,29 +741,11 @@ class Annotator(widgets.Container):
 
 
         if keep_image == False:
-            channel = str(self.channel.value)
-            resolution_level = str(self.level.value)
-            image = self.image.from_roi([i-self.image_size.value//2 for i in c_coord]+[self.image_size.value,self.image_size.value,self.image_size.value], level=resolution_level, channel=channel)
-            translate = [int(i)-self.image_size.value//2 for i in c_coord]
-            local_coords = np.array(coords) - np.array(translate)
-            mask = np.all((local_coords >= np.array([0,0,0])) & (local_coords < np.array([self.image_size.value, self.image_size.value, self.image_size.value])), axis=1)
-            local_coords = local_coords[mask]
-            local_coords = local_coords.astype(int)
-            # adjust contrast limits according to intensity distribution of foreground points
-            intensities = image[local_coords[:, 0], local_coords[:, 1], local_coords[:, 2]]
-            mean_value = np.mean(intensities)
-            std_value = np.std(intensities)
-            self.image_layer.data = image
-            self.image_layer.reset_contrast_limits()
-            self.image_layer.contrast_limits = [min(mean_value//2,200),mean_value+std_value]
-            self.image_layer.translate = translate
-            self.viewer.camera.center = c_coord
-
+            self._crop_block(c_coord, coords)
 
         self.node_type_dropdown.changed.disconnect(self.on_changing_type)
         self.node_type_dropdown.value = self.node_types[self.G.nodes[selection]['type']]
         self.node_type_dropdown.changed.connect(self.on_changing_type)
-
 
         self.point_layer.data = np.array(coords)
         self.point_layer.properties = properties
@@ -709,6 +756,436 @@ class Annotator(widgets.Container):
         self.ex_edge_layer.data = np.array(edges)
         self.viewer.layers.selection.active = self.point_layer
 
+
+    def _heal_level_channel(self):
+        """napari clears magicgui ComboBox choices whenever layers are added or
+        removed; neurofly builds its choices once so they die after that
+        (value becomes None and lookups like resolution_levels.index crash).
+        Rebuild the level/channel choices from self.image in a blocked psygnal
+        context (no handler side effects). Returns the current resolution
+        level index, or None if there is no image loaded."""
+        if self.image is None:
+            return None
+        levels = list(self.image.resolution_levels)
+        if len(list(self.level.choices)) != len(levels) or self.level.value not in levels:
+            prev = self.level.value if self.level.value in levels else None
+            with self.level.changed.blocked():
+                self.level.choices = levels
+                if prev is None:
+                    prev = levels[min(getattr(self, '_last_level_idx', 0), len(levels) - 1)]
+                self.level.value = prev
+        self._last_level_idx = levels.index(self.level.value)
+        channels = list(self.image.channels)
+        if len(list(self.channel.choices)) != len(channels) or self.channel.value not in channels:
+            chan = self.channel.value if self.channel.value in channels else None
+            with self.channel.changed.blocked():
+                self.channel.choices = channels
+                self.channel.value = chan if chan is not None else channels[0]
+        return levels.index(self.level.value)
+
+
+    def _crop_block(self, c_coord, coords):
+        """Load the 64..1024³ block around c_coord and sync every coordinate
+        layer to the physical (µm) world. Shared by refresh (task switch) and
+        the debounced block-size re-crop."""
+        if self._heal_level_channel() is None:
+            return
+        channel = str(self.channel.value)
+        resolution_level = str(self.level.value)
+        image = self.image.from_roi([i-self.image_size.value//2 for i in c_coord]+[self.image_size.value,self.image_size.value,self.image_size.value], level=resolution_level, channel=channel)
+        translate = [int(i)-self.image_size.value//2 for i in c_coord]
+        local_coords = np.array(coords) - np.array(translate)
+        mask = np.all((local_coords >= np.array([0,0,0])) & (local_coords < np.array([self.image_size.value, self.image_size.value, self.image_size.value])), axis=1)
+        local_coords = local_coords[mask]
+        local_coords = local_coords.astype(int)
+        # adjust contrast limits according to intensity distribution of foreground points
+        if len(local_coords) == 0:
+            local_coords = np.array([[self.image_size.value//2]*3])
+        intensities = image[local_coords[:, 0], local_coords[:, 1], local_coords[:, 2]]
+        mean_value = np.mean(intensities)
+        std_value = np.std(intensities)
+        self.image_layer.data = image
+        self.image_layer.reset_contrast_limits()
+        self.image_layer.contrast_limits = [min(mean_value//2,200),mean_value+std_value]
+        # anisotropic datasets: use per-axis physical spacing (µm/voxel) for the
+        # layer scale so the view keeps true proportions; node/edge layers carry
+        # level-voxel absolute coordinates and follow the same spacing with
+        # zero translate. The block origin is kept in voxels for put_point.
+        spacing = self.image.info[self.image.resolution_levels.index(resolution_level)]['spacing']
+        self._image_origin = translate
+        self.image_layer.scale = spacing
+        self.image_layer.translate = [i*j for i,j in zip(translate,spacing)]
+        for attr in ('point_layer','edge_layer','ex_edge_layer'):
+            coord_layer = getattr(self, attr, None)
+            if coord_layer is not None:
+                coord_layer.scale = spacing
+                coord_layer.translate = [0.0,0.0,0.0]
+        self.viewer.camera.center = [i*j for i,j in zip(c_coord,spacing)]
+
+
+    def _on_image_size_changed(self):
+        """Debounced live re-crop: the block reloads around the current
+        selection without re-picking a task."""
+        self._recrop_timer.start()
+
+
+    def _recrop_current(self):
+        if self.mode_switch.mode != 'labeling' or self.image is None or self.G is None:
+            return
+        try:
+            nid = int(self.selected_node.value)
+        except ValueError:
+            return
+        if nid not in self.G.nodes:
+            return
+        c_coord = self.G.nodes[nid]['coord']
+        self._crop_block(c_coord, [c_coord])
+
+
+    def _slice_plane_normal(self):
+        az = np.deg2rad(self.slice_azimuth.value)
+        el = np.deg2rad(self.slice_elevation.value)
+        return np.array([np.cos(el)*np.cos(az), np.cos(el)*np.sin(az), np.sin(el)])
+
+
+    def _ensure_slice_nodes(self):
+        if getattr(self, 'slice_nodes', None) is None:
+            self.slice_nodes = self.viewer.add_points(
+                name='slice nodes', face_color='#ff9f1c', size=4,
+                shading='spherical', ndim=3)
+            # click a node on the slice = select it (same as panorama view)
+            self.slice_nodes.mouse_drag_callbacks.append(self.slice_node_selection)
+        self.slice_nodes.visible = True
+        return self.slice_nodes
+
+
+    def slice_node_selection(self, layer, event):
+        if event.button == 1:
+            # napari 0.7 removed click_get_value; _get_value_ is what the
+            # Points select binding itself uses
+            index = layer._get_value_(
+                position=event.position,
+                view_direction=event.view_direction,
+                dims_displayed=event.dims_displayed,
+                world=True,
+            )
+            if index is not None:
+                self.selected_node.value = str(layer.properties['nids'][index])
+
+
+    def update_slice_plane(self):
+        """Slicer: a slicing plane through the whole panorama volume (coarse
+        level, instant navigation). A finer 'slice level' loads that level's
+        full volume in the background and swaps it into the slice layer, so
+        the plane depiction samples finer voxels and the slice gets sharper."""
+        if self.image is None or self.panorama_image is None or self.panorama_image.data is None \
+                or not self.slice_enabled.value:
+            if self.panorama_image is not None:
+                # 恢复体渲染：plane depiction 下整层只画切面，整脑会"消失"
+                self.panorama_image.depiction = 'volume'
+                self.panorama_image.visible = True
+            if getattr(self, 'slice_volume_layer', None) is not None:
+                self.slice_volume_layer.visible = False
+            if getattr(self, 'slice_nodes', None) is not None:
+                self.slice_nodes.visible = False
+            self._slicer_was_on = False
+            return
+        resolution_level = self._heal_level_channel()
+        if resolution_level is None:
+            return
+        levels = list(self.image.resolution_levels)
+        spacing_p = np.asarray(self.image.info[pano_idx := self._panorama_level_idx()]['spacing'], dtype=float)
+        normal = self._slice_plane_normal()
+        # world normal = data normal / spacing (per axis), normalized - an
+        # axis-aligned normal is invariant under this, a diagonal one is not
+        # (elevation tilts were ~2.8x off on anisotropic data)
+        normal_world = normal / spacing_p
+        normal_world /= np.linalg.norm(normal_world)
+        # napari layer events clear our combo too — heal it with the panorama
+        # level as fallback (never a fine level we cannot afford)
+        # 用户的层级选择保存在 _slice_level_request（napari 事件清空 combo 后
+        # 由这里恢复），清除/无效时才回退全景粗层
+        cur = self.slice_src_level.value
+        if cur in levels:
+            self._slice_level_request = levels.index(cur) if levels.index(cur) != pano_idx else None
+        else:
+            request_idx = getattr(self, '_slice_level_request', None)
+            if request_idx is None:
+                request_idx = pano_idx
+            request_idx = min(request_idx, len(levels) - 1)
+            with self.slice_src_level.changed.blocked():
+                self.slice_src_level.choices = levels
+                self.slice_src_level.value = levels[request_idx]
+        # 切面清晰度：请求层 ≠ 全景层 → 只读切面穿过的板状区域（见
+        # _request_slice_slab，在算好切面几何后调用），层越细切面越清晰
+        requested = str(self.slice_src_level.value)
+        requested_idx = levels.index(requested) if requested in levels else pano_idx
+        spacing_p = np.asarray(self.image.info[pano_idx]['spacing'], dtype=float)
+        normal = self._slice_plane_normal()
+        # world normal = data normal / spacing (per axis), normalized - an
+        # axis-aligned normal is invariant under this, a diagonal one is not
+        # (elevation tilts were ~2.8x off on anisotropic data)
+        normal_world = normal / spacing_p
+        normal_world /= np.linalg.norm(normal_world)
+
+        # plane center (world µm): rotate around a fixed pivot; only the
+        # offset slider moves the pivot (along the current world normal) -
+        # otherwise rotating the normal would swing the plane center on a
+        # circle and the slab would sweep the node cloud far faster than the
+        # rotation itself. Pivot is clamped to the volume.
+        roi = self.image.rois[pano_idx]
+        volume_center = (np.asarray(roi[0:3], dtype=float) + np.asarray(roi[3:], dtype=float) / 2.0) * spacing_p
+        roi_lo_w = np.asarray(roi[0:3], dtype=float) * spacing_p
+        roi_hi_w = (np.asarray(roi[0:3], dtype=float) + np.asarray(roi[3:], dtype=float)) * spacing_p
+        shift_max = 0.5 * float(np.linalg.norm(np.asarray(roi[3:], dtype=float) * spacing_p * normal))
+        if getattr(self, '_slice_pivot', None) is None or self._slice_pivot_offset != self.slice_offset.value:
+            shift = (self.slice_offset.value - 50) / 50.0 * shift_max
+            self._slice_pivot = np.clip(volume_center + shift * normal_world, roi_lo_w, roi_hi_w)
+            self._slice_pivot_offset = self.slice_offset.value
+        P_world = np.clip(self._slice_pivot, roi_lo_w, roi_hi_w)
+
+        # 切割平面画在复制的 slice volume 层上（depiction='plane' 只渲染切面，
+        # 会遮住整层体数据）；panorama 保持 volume 渲染 = 整体体积始终可见
+        pano = self.panorama_image
+        pano.visible = True
+        sv = self.slice_volume_layer
+        if sv is None:
+            self.slice_volume_layer = self.viewer.add_image(
+                pano.data, name='slice volume', scale=tuple(float(v) for v in pano.scale),
+                translate=tuple(float(v) for v in pano.translate),
+                colormap=str(pano.colormap.name), blending='additive')
+            sv = self.slice_volume_layer
+            sv.depiction = 'plane'
+            if id(sv) not in self._scene_translate_last:
+                self._scene_translate_last[id(sv)] = np.asarray(sv.translate, dtype=float)
+                sv.events.translate.connect(self._on_scene_translate)
+        if self._slice_slab_level != requested_idx:
+            # 目标层数据还没读到（或就是全景层）：贴全景数据兜底
+            sv.data = pano.data
+            sv.scale = tuple(float(v) for v in pano.scale)
+            self._set_layer_translate(sv, pano.translate)
+        sv.visible = True
+        sv.depiction = 'plane'
+        # 场景 shift 拖动的偏移 t_scene：板**读取**用真实世界坐标（P_world，
+        # 与视图无关），**显示**时再加 t_scene（板跟着拖动的场景走），切面
+        # 位置两边抵消恒等于真实帧 —— 之前把 t_scene 混进读取坐标，板被裁
+        # 剪到体积边缘，切面落在板外，表现为切面层"消失"
+        t_scene = np.asarray(self.panorama_points.translate, dtype=float)
+        P_scene = P_world + t_scene
+        if requested_idx != pano_idx:
+            self._request_slice_slab(requested_idx, P_world, normal_world)
+        sv.plane.position = (P_scene - np.asarray(sv.translate, dtype=float)) / np.asarray(sv.scale, dtype=float)
+        n_d_unit = normal / np.linalg.norm(normal)
+        sv.plane.normal = n_d_unit
+        # 物理板厚 = thickness_data × |spacing·n̂_d|；按 sv 自己的 scale 换算
+        # （sv 可能装的是细层板数据，spacing ≠ 全景层）。vispy 要求 ≥1.0 数
+        # 据单位——粗层 × 小厚度下取 1.0 下限，只影响渲染板厚，节点过滤
+        # 仍按真实 µm 精确执行。之前小于 1.0 时 vispy 抛异常，把本函数后半
+        # 段（节点过滤）整个中断，表现为"调小 thickness 节点数不变"
+        world_per_data = float(np.linalg.norm(np.asarray(sv.scale, dtype=float) * n_d_unit))
+        sv.plane.thickness = max(1.0, float(self.slice_thickness.value) / world_per_data)
+
+        # db nodes inside the slab (physical, world µm): hr-voxel coords -> world，
+        # 加上场景 shift 拖动偏移（节点层 translate），与切面显示位置一致
+        hr_spacing = np.asarray(self.image.info[resolution_level]['spacing'], dtype=float)
+        pts = self.panorama_points.data
+        props = self.panorama_points.properties
+        if pts is None or len(pts) == 0:
+            pts = np.array([self.G.nodes[n]['coord'] for n in self.G.nodes])
+            nids_all = np.asarray(list(self.G.nodes))
+        else:
+            nids_all = np.asarray(props['nids']) if props and 'nids' in props else np.arange(len(pts))
+        if len(pts) == 0:
+            return
+        t_scene = np.asarray(self.panorama_points.translate, dtype=float)
+        node_world = np.asarray(pts, dtype=float) * hr_spacing + t_scene
+        dist = (node_world - (P_world + t_scene)) @ normal_world
+        inside = np.abs(dist) <= float(self.slice_thickness.value) / 2.0
+        sl = self._ensure_slice_nodes()
+        # slice-nodes carry the same hr-voxel coords as panorama_points；
+        # translate 不重置——用户 shift 拖动场景后的偏移要保留
+        sl.scale = hr_spacing
+        sl.data = np.asarray(pts)[inside]
+        sl.properties = {'nids': nids_all[inside]}
+        if not self._slicer_was_on:
+            # 勾选 slicer 即进入选点交互（点击节点=选中，q 进 labeling）
+            self.viewer.layers.selection.active = sl
+        self._slicer_was_on = True
+
+
+    def _set_layer_translate(self, lyr, value):
+        """我们自己的 translate 写入：blocked（不触发拖动同步）+ 更新记录"""
+        value = tuple(float(v) for v in value)
+        with lyr.events.blocker():
+            lyr.translate = value
+        self._scene_translate_last[id(lyr)] = np.asarray(value, dtype=float)
+
+
+    def _on_scene_translate(self, event):
+        """用户 shift 拖动任意场景层（pano/切面板/节点层）：把拖动产生的世
+        界偏移 delta 同步到其余层，整场景一起动。我们自己的写入走
+        _set_layer_translate（blocked），这里只响应用户拖动。"""
+        src = getattr(event, 'source', None)
+        if src is None:
+            return
+        cur = np.asarray(src.translate, dtype=float)
+        prev = self._scene_translate_last.get(id(src))
+        if prev is None:
+            self._scene_translate_last[id(src)] = cur
+            return
+        if np.allclose(prev, cur):
+            return
+        delta = cur - prev
+        self._scene_translate_last[id(src)] = cur
+        for lyr in (self.panorama_image, self.panorama_points,
+                    self.slice_volume_layer, self.slice_nodes):
+            if lyr is None or lyr is src:
+                continue
+            key = id(lyr)
+            base = self._scene_translate_last.get(key)
+            base = np.asarray(base if base is not None else lyr.translate, dtype=float)
+            new = base + delta
+            self._scene_translate_last[key] = new
+            with lyr.events.blocker():
+                lyr.translate = tuple(float(v) for v in new)
+
+
+    def _panorama_level_idx(self):
+        """The coarse level refresh_panorama renders (first roi with all
+        dims < 1000)."""
+        for i, roi in enumerate(self.image.rois):
+            if (np.array(roi[3:]) < np.array([1000, 1000, 1000])).all():
+                return i
+        return 0
+
+
+    _SLICE_SLAB_MAX_GB = 16.0   # 单块板读取门槛（超过大概率是接近 45° 的斜切）
+    _SLAB_MARGIN_VOX = 32       # 板外扩余量（体素）：小调 offset/角度不必马上补读
+
+
+    @staticmethod
+    def _slab_covers(box, need):
+        """已装载板 box=(lo,hi) 是否完全覆盖需求 need（level-voxel 界，hi 独占）"""
+        if box is None:
+            return False
+        lo_b, hi_b, lo_n, hi_n = (np.asarray(v) for v in (*box, *need))
+        return bool(((lo_b <= lo_n).all() and (hi_n <= hi_b).all()))
+
+
+    def _request_slice_slab(self, level_idx, P_world, normal_world):
+        """选了比全景层细的层：只读切面 ±T/2 板在世界系的轴对齐包围盒。
+        板厚沿轴 i = T/|n_i|（µm）；法线零分量轴 = 板与该轴平行，取全范围。
+        已装载/在读的板盖住需求时不重读；出界则防抖后补读。读之前切面
+        继续贴全景数据（或旧板）导航。"""
+        levels = list(self.image.resolution_levels)
+        spacing_s = np.asarray(self.image.info[level_idx]['spacing'], dtype=float)
+        roi = np.asarray(self.image.rois[level_idx], dtype=float)
+        size_w = roi[3:] * spacing_s
+        thick = float(self.slice_thickness.value)
+        abs_n = np.abs(normal_world)
+        # 板厚沿轴 i = (T/2 + Σ_{j≠i}|n_j|·D_j/2)/|n_i|：除板厚外，平面在
+        # 其它轴上扫过的整个范围也要计入（否则倾斜切面会被包围盒截断）；
+        # 法线零分量轴 = 板与该轴平行，取全范围
+        half_w = np.array([
+            (thick / 2.0 + float(np.dot(np.delete(abs_n, i), (np.delete(size_w, i) / 2.0)))) / abs_n[i]
+            if abs_n[i] > 1e-9 else size_w[i] / 2.0
+            for i in range(3)])
+        lo_w = np.clip(P_world - half_w, roi[0:3] * spacing_s, (roi[0:3] + roi[3:]) * spacing_s)
+        hi_w = np.clip(P_world + half_w, roi[0:3] * spacing_s, (roi[0:3] + roi[3:]) * spacing_s)
+        margin_w = self._SLAB_MARGIN_VOX * spacing_s
+        lo = np.floor((lo_w - margin_w - roi[0:3] * spacing_s) / spacing_s).astype(np.int64)
+        hi = np.floor((hi_w + margin_w - roi[0:3] * spacing_s) / spacing_s).astype(np.int64) + 1
+        lo = np.clip(lo, 0, roi[3:].astype(np.int64))
+        hi = np.clip(hi, lo + 1, roi[3:].astype(np.int64))
+        gb = float(np.prod(hi - lo)) * 2.0 / 1e9
+        if gb > self._SLICE_SLAB_MAX_GB:
+            key = (level_idx, round(gb))
+            if key != self._slab_refused_key:
+                self._slab_refused_key = key
+                show_info(f'{levels[level_idx]} slab ~{gb:.1f} GB — too big for a '
+                          f'sharp slice (limit {self._SLICE_SLAB_MAX_GB:.0f} GB)')
+            return
+        need = (level_idx, tuple(lo.tolist()), tuple(hi.tolist()))
+        if self._slice_slab_level == level_idx and self._slab_covers(self._slice_slab_box, need[1:]):
+            return  # 已装载的板盖住需求
+        if self._slice_slab_loading is not None and self._slab_covers(self._slice_slab_loading[1:], need[1:]):
+            return  # 在读的板盖住需求
+        self._slab_need = need
+        self._slab_read_timer.start()  # 滑杆连续动时反复重置，停稳才真读
+
+
+    def _start_slab_read(self):
+        need = self._slab_need
+        if need is None:
+            return
+        if self._slice_slab_loading is not None:
+            # 已有一个读在进行：不并发开第二个（同一 HDF5/数据句柄并发读会
+            # 撞锁卡死），500ms 后重试当前需求
+            self._slab_read_timer.start()
+            return
+        self._slab_need = None
+        level_idx, lo, hi = need
+        lo, hi = np.asarray(lo), np.asarray(hi)
+        if self._slice_slab_level == level_idx and self._slab_covers(self._slice_slab_box, (lo, hi)):
+            return
+        roi0 = np.asarray(self.image.rois[level_idx][0:3], dtype=np.int64)
+        read_roi = [int(v) for v in (roi0 + lo)] + [int(v) for v in (hi - lo)]
+        image, channel = self.image, str(self.channel.value)
+        self._slice_slab_loading = (level_idx, lo, hi)
+        show_info(f'loading {list(self.image.resolution_levels)[level_idx]} slab '
+                  f'({float(np.prod(np.asarray(hi) - np.asarray(lo))) * 2.0 / 1e6:.0f} MB)…')
+
+        def read():
+            try:
+                data = image.from_roi(read_roi, level=level_idx, channel=channel)
+            except Exception as exc:  # noqa: BLE001
+                print(f'slice slab read failed: {exc}', flush=True)
+                data = None
+            self._slice_slab_pending = (level_idx, lo, hi, data)
+
+        threading.Thread(target=read, daemon=True).start()
+
+
+    def _poll_slice_load(self):
+        pending = self._slice_slab_pending
+        if pending is None:
+            return
+        self._slice_slab_pending = None
+        level_idx, lo, hi, data = pending
+        if self._slice_slab_loading is not None and self._slice_slab_loading[:3] == (level_idx, lo, hi):
+            self._slice_slab_loading = None
+        if data is None or self.slice_volume_layer is None:
+            return  # 读失败，或 slicer 已关（下次勾选由 update_slice_plane 建层）
+        spacing_s = np.asarray(self.image.info[level_idx]['spacing'], dtype=float)
+        roi0 = np.asarray(self.image.rois[level_idx][0:3], dtype=float)
+        sv = self.slice_volume_layer
+        if self._slice_slab_level == level_idx and self._slab_covers(self._slice_slab_box, (lo, hi)):
+            return  # 已有更大的板盖住这块晚到的（比如刚补读了一块更全的）
+        sv.data = data
+        sv.scale = tuple(float(v) for v in spacing_s)
+        # 显示位置 = 板的真实世界位置 + 场景 shift 拖动偏移（与切面/节点同帧）
+        t_scene = np.asarray(self.panorama_points.translate, dtype=float)
+        self._set_layer_translate(sv, (roi0 + np.asarray(lo, dtype=float)) * spacing_s + t_scene)
+        try:
+            sv.reset_contrast_limits()
+        except Exception:
+            pass
+        self._slice_slab_level = level_idx
+        self._slice_slab_box = (np.asarray(lo), np.asarray(hi))
+        self.update_slice_plane()  # 换板后按新 translate 重算切面
+        show_info(f'{list(self.image.resolution_levels)[level_idx]} slice loaded '
+                  f'({float(np.prod(np.asarray(hi) - np.asarray(lo))) * 2.0 / 1e6:.0f} MB)')
+
+
+    def _heal_hr_spacing(self):
+        """Annotator 当前层的 spacing（节点 db 坐标的口径）。
+
+        纯读：不触发下拉框自愈（那会从后台线程改 Qt 控件，必死锁）。
+        """
+        levels = list(self.image.resolution_levels)
+        val = self.level.value
+        idx = levels.index(val) if val in levels else 0
+        return np.asarray(self.image.info[idx]['spacing'], dtype=float)
 
     def recover(self, viewer):
         # recover the preserved deleted nodes if exists
@@ -818,12 +1295,23 @@ class Annotator(widgets.Container):
         self.nodes_left.value = int(n_nodes)
 
 
-    def refresh_panorama(self):
+    def refresh_panorama(self, *args):
+        # *args: magicgui PushButton.changed emits the button value (False);
+        # a plain (self) signature crashed with "takes 1 positional argument
+        # but 2 were given" when wired to that signal
         if self.mode_switch.mode == 'labeling':
             show_info('switch to panorama mode first')
             return
         if str(self.db_path.value) == '.':
             show_info('please select a database file')
+            return
+        if str(self.image_path.value) == '.':
+            # e.g. reading the db first: loading the graph needs the image too,
+            # retrying after the image is selected gives the complete state
+            show_info('please select an image file')
+            return
+        resolution_level = self._heal_level_channel()
+        if resolution_level is None:
             return
         if self.G is None:
             p = index.Property(dimension=3)
@@ -850,26 +1338,25 @@ class Annotator(widgets.Container):
                 if (np.array(roi[3:])<np.array([1000,1000,1000])).all():
                     level = i
                     break
-            # calculate scale
-            resolution_level = self.image.resolution_levels.index(str(self.level.value))
-            hr_image_size = self.image.info[resolution_level]['image_size']
-            lr_image_size = self.image.info[level]['image_size']
-            scale = [i/j for i,j in zip(hr_image_size,lr_image_size)]
+            # per-axis physical spacing (µm/voxel) instead of size ratios,
+            # so anisotropic datasets keep true proportions (resolves the TODO below)
+            spacing = self.image.info[resolution_level]['spacing']
+            pano_spacing = self.image.info[level]['spacing']
 
             image = self.image.from_roi(roi, level=level, channel=str(self.channel.value))
             origin = self.image.info[resolution_level]['origin']
             self.panorama_image.data = image
-            # TODO: for anisotropic image
-            self.panorama_image.scale = scale
-            self.panorama_image.translate = origin
+            self.panorama_image.scale = pano_spacing
+            self._set_layer_translate(self.panorama_image, [i*j for i,j in zip(origin,spacing)])
             self.panorama_image.visible = True
             self.panorama_image.reset_contrast_limits()
             self.panorama_image.metadata['loaded'] = True
         
         # load full image if it's tiff format
-        if '.tif' in str(self.image_path.value) and self.image_switch.value == True: 
-            image = self.image.from_roi(self.image.roi) 
+        if '.tif' in str(self.image_path.value) and self.image_switch.value == True:
+            image = self.image.from_roi(self.image.roi)
             self.panorama_image.data = image
+            self.panorama_image.scale = self.image.info[0]['spacing']
             self.panorama_image.visible = True
             self.panorama_image.reset_contrast_limits()
 
@@ -924,9 +1411,9 @@ class Annotator(widgets.Container):
             'colors': colors,
             'nids': np.array(nids)
         }
-        
-        resolution_level = self.image.resolution_levels.index(str(self.level.value))
-        camera_center  = [i + j//2 for i,j in zip(self.image.rois[resolution_level][0:3],self.image.rois[resolution_level][3:])]
+
+        spacing = self.image.info[resolution_level]['spacing']
+        camera_center  = [(i + j//2)*s for i,j,s in zip(self.image.rois[resolution_level][0:3],self.image.rois[resolution_level][3:],spacing)]
 
         self.panorama_points.visible = True
         self.panorama_points.data = np.array(coords)
@@ -935,6 +1422,13 @@ class Annotator(widgets.Container):
         self.panorama_points.face_color = 'colors'
         self.panorama_points.size = sizes
         self.panorama_points.selected_data = []
+
+        # panorama point/view layers carry hr-level absolute voxel coordinates
+        for attr in ('panorama_points','panorama_view'):
+            coord_layer = getattr(self, attr, None)
+            if coord_layer is not None:
+                coord_layer.scale = spacing
+                coord_layer.translate = [0.0,0.0,0.0]
 
 
         if self.image_switch.value == True:
@@ -950,6 +1444,7 @@ class Annotator(widgets.Container):
         self.viewer.reset_view()
         self.viewer.camera.center = camera_center
         self.viewer.layers.selection.active = self.panorama_points
+        self.update_slice_plane()
 
 
     def node_selection(self, layer, event):
@@ -1198,6 +1693,11 @@ class Annotator(widgets.Container):
                 event.view_direction,
                 event.dims_displayed
             )
+            if near_point is None or far_point is None:
+                # the click ray does not pass through the image volume
+                # (e.g. clicking outside the block in 3D view)
+                show_info("click is outside the image volume")
+                return
             sample_ray = far_point - near_point
             length_sample_vector = np.linalg.norm(sample_ray)
             increment_vector = sample_ray / (2 * length_sample_vector)
@@ -1217,7 +1717,7 @@ class Annotator(widgets.Container):
                 values.append(value)
             max_point_index = values.index(max(values))
             max_point = sample_points[max_point_index]
-            max_point = [i+int(j) for i,j in zip(max_point,self.image_layer.translate)]
+            max_point = [i+int(j) for i,j in zip(max_point,getattr(self,'_image_origin',[0,0,0]))]
 
             # get new node id
             new_id = len(self.G)
